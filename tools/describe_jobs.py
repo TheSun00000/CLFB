@@ -342,6 +342,16 @@ FAMILIES = {
 }
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
+SETUP = {
+    'return-focus': 'All fine-tuned models start from the same pretrained FB model (the "pretrained model" row of the tables). Each is trained for 500k updates on one task, run, with 100k labelled states of run: B, F and the actor are all updated (the FB objective, the orthonormality term, and the reward term L_rec that regresses the reward of run on B). In addition the latent of run is mixed into the latents used to train F and the actor (focus). The retention terms are off: there is only one task. Evaluation: zero-shot return, the latent being inferred from 10k labelled states of the task, 20 episodes of 1000 steps.',
+    'lrec-vs-fit': 'One stage on the task run, from the pretrained walker model. The reference (dashed, "E3 phase 1") is B alone regressed on the reward with a fixed readout for 30k steps. L_rec is the reward term of the continual method that does the same regression inside the joint training with L_FB and the orthonormality term. eps is the reward reconstruction error on held-out states (lower is better; 1 means nothing is explained). In the run names: lam = weight of L_rec, ortho = coefficient of the orthonormality term, prefit = a B-only fit before the joint training, resolved readout = the readout is re-solved from B at every step (the current method; otherwise fixed), labels = labelled states (10k unless stated).',
+    'frozen-b': 'Pretrained walker FB model, B and the task latent frozen; only F and the actor are trained, for 500k updates on the task run, with every training latent equal to the latent of run plus angular noise (spread: 0 = exactly the latent, 0.2 = a small cone around it). Return = zero-shot return on run, 20 episodes. 3 runs per setting.',
+    'oracle': 'Pretrained walker FB model, B frozen; F and the actor are trained for 200k updates on the task run with the run latent as the only latent and the Q loss only (no FB objective). The critic reward is either the true reward of every dataset state (oracle) or the implicit reward B(s)^T Sigma^-1 z of FB. 2 runs each.',
+    'finetune': 'Walker task run, 1M updates, from the pretrained FB model. E1: only the actor is trained (F and B frozen). E2: B frozen, F trained with the Q loss on the reward implied by B. E3: B is first regressed on the reward of run (30k steps), then as E2. R1 and R2: single-reward TD3 from scratch (no FB) on the reward E2 and E3 train on. 10k or 100k labelled states, 1 run each.',
+    'finetune-ablation': 'E3 of the Fine-tuning family (B regressed on the reward, then the critic trained, 1M updates, 10k labels) with changes: "F and actor re-initialised" starts F and the actor from scratch (B kept); "lr 3e-4, tau 0.005" uses the learning rate and target rate of the TD3 reference instead of the FB ones (1e-4, 0.01). 2 runs per variant.',
+}
+
+
 EXTRA = {
     'task-design': {
         'standalone': True,
@@ -353,9 +363,24 @@ EXTRA = {
         'figures': [
             {'plot': 'return', 'panel': 'task focus', 'title': 'Does training on the task latent raise the return?',
              'why': 'Zero-shot return on run, with the latent inferred from fresh labels (higher is better). Focus is the share of the training z replaced by the task latent; 0 is the unfocused run of the previous round. For scale: the pretrained policy is at 340 and E3 reaches 419-438 after 1M updates.'},
-            {'type': 'latentcontrol', 'title': 'Does the task latent really drive the policy? Control with a random latent',
+            {'type': 'latentcontrol', 'legend': [
+                ['Pretrained model', 'The starting point of every fine-tuned model below: the FB model pretrained on the random-exploration walker dataset (fb_pretrain.py, run 2026-10-29_14-44-51_FBpretrain-walker). It was never trained on any of these rewards. Row = its zero-shot return on each task.'],
+                ['Base run', 'One setting of the fine-tuning experiment, the reference one: the pretrained model trained for 500k updates on ONE task, run (B, F and the actor are all updated), with L_FB and the orthonormality term on, the reward term L_rec with weight 100 on 100k labelled states of run, and F and the actor trained only on the latent of run plus a little noise (focus 1.0, noise 0.2). Run 4 times with different random seeds; the table shows the mean of the 4. No other task was trained on: they are only evaluated.'],
+                ['All 17 fine-tuned settings', 'The same experiment had 20 runs in 17 different settings (the base setting 4 times, 16 variants once: other focus levels, noise, L_rec weights, Q-loss weights, no L_rec, ...). This group is the plain average of the final models of the 17 settings, the base counted once. It includes weak variants (no L_rec, small weights), so read it as "a typical fine-tuned model": it shows whether a pattern holds beyond the base run.'],
+                ['latent / random / gain', 'latent: the policy gets the latent inferred from 10k labelled states of the task (what the method delivers). random: it gets a random vector on the sphere instead. gain = latent minus random: how much the task latent really contributes. Each number is the mean over 20 episodes.']], 'title': 'Does the task latent really drive the policy? Control with a random latent',
              'why': 'Same checkpoints and tasks, but the policy gets a random latent instead of the one inferred from labelled states; the gain is what the task latent contributes. The built-in tasks lose 150-500 points without it. Among the new tasks only split has a clear latent-driven ability in the pretrained model (977 against 386), and it is gone after fine-tuning on run (594 against 602): that one is real forgetting. spin_back, kick_r and jump gain little from the latent at either point, and for knees_bent it even hurts after fine-tuning (287 with the latent, 601 with a random one).'},
-            {'type': 'alltasks', 'title': 'What happens to the other tasks?',
+            {'type': 'alltasks', 'legend': [
+                ['First row', 'Pretrained model, zero-shot (see the table above). Every other row is a fine-tuned model of the same experiment (500k updates on run, 100k labels); the colour is the change from the first row (grey: within 20).'],
+                ['lam', 'weight of the reward term L_rec that regresses the reward of run on B (0 = no L_rec).'],
+                ['focus', 'share of the latents used to train F and the actor that are the latent of run (0 = none: the previous round, trained on uniform latents; 1.0 = all).'],
+                ['noise', 'angular noise added around the run latent in training (0 = exactly the latent).'],
+                ['actor focus 1.0', 'the actor sees the run latent in all its training samples, whatever F sees.'],
+                ['Q loss 0.1 / 1.0', 'weight of the Q loss in the critic objective (default 0.01).'],
+                ['Q loss only, no L_FB', 'the critic is trained on the Q loss alone, without the FB objective (the E3-like critic).'],
+                ['no B(s) latents', 'F is trained without the latents taken from B of shuffled states (mix_ratio 0).'],
+                ['prefit, B frozen', 'B is first fitted alone to the reward of run, then frozen while F and the actor are trained.'],
+                ['Columns', 'stand, walk, vel8, run, flip are the five benchmark tasks; spin_back, kick_r, lean_a, jump, knees_bent, split are the new tasks defined on the observation (see Reward design). Return of 1000 steps; 1000 is the maximum for most.']],
+             'title': 'What happens to the other tasks?',
              'why': 'Zero-shot return on every walker task at the end of training (latent inferred from fresh labels, 20 episodes), with the change from the pretrained model in colour. The five built-in tasks (left) do not suffer from the focus on run. The six columns on the right are new tasks defined for the two-task test; no run was trained on them (the latent says little about them: eps 0.4-0.8), so their returns mostly reflect the default posture of the policy and vary a lot between runs (lean_a: 29 to 978 at the same eps). They are not evidence of forgetting by themselves; see the control with a random latent below.'},
             {'plot': 'eps', 'panel': 'task focus', 'title': 'Does the task focus hurt the reward fit?',
              'why': 'Held-out error of the reward reconstruction (lower is better; the E3 reference is 0.032). With the task focus it stays at 0.03-0.06, only a little above the unfocused run (0.036).'},
@@ -478,4 +503,6 @@ for k, extra in EXTRA.items():
     fam_docs[k].update(extra)
 fam_docs['lrec-vs-fit']['table'] = 'eps'
 fam_docs['return-focus']['table'] = 'eps'
+for k, t in SETUP.items():
+    fam_docs[k]['setup'] = t
 json.dump(fam_docs, open('hpc/status/families.json', 'w'), indent=1)

@@ -158,7 +158,14 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 .mx th.row { text-align: right; }
 .mx .g-built { color: var(--bad); font-weight: 600; } .mx .g-first { color: var(--accent); } .mx .g-pick { font-weight: 700; text-decoration: underline; }
 .mxkey { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.mxkey .g-built { color: var(--bad); font-weight: 600; } .mxkey .g-first { color: var(--accent); } .mxkey .g-pick { font-weight: 700; text-decoration: underline; color: var(--ink); }
 .mxkey i { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 5px; border-radius: 2px; }
+.setup { font-size: 13.5px; color: var(--muted); max-width: 84ch; margin: 0 0 14px; }
+.setup b { color: var(--ink); font-weight: 600; }
+dl.legend { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; margin: 6px 0 10px; max-width: 100ch; padding: 10px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+dl.legend dt { font-weight: 600; color: var(--ink); font-family: var(--font-body); font-size: 13px; }
+dl.legend dd { margin: 0; color: var(--muted); }
+dl.legend .lt { grid-column: 1 / -1; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 500; }
 .alltasks { margin: 0 0 22px; }
 .alltasks table { font-size: 13px; }
 .alltasks td.num, .alltasks th.num { text-align: right; white-space: nowrap; font-family: var(--font-mono); }
@@ -641,6 +648,12 @@ details.allruns .tablebox { margin-top: 8px; }
     var best = ok.reduce(function (m, c) { return dir > 0 ? Math.max(m, c.val) : Math.min(m, c.val); }, ok[0].val);
     ok.forEach(function (c) { if (c.val === best) c.td.style.fontWeight = "700"; });
   }
+  function legendEl(items) {        // 'How to read this table': term -> meaning, shown before the table
+    if (!items || !items.length) return null;
+    var dl = el("dl", "legend"); dl.appendChild(el("div", "lt", "How to read this table"));
+    items.forEach(function (it) { dl.appendChild(el("dt", null, it[0])); dl.appendChild(el("dd", null, it[1])); });
+    return dl;
+  }
   function buildMatrix() {     // |correlation| of the candidate rewards over dataset states, one cell per pair
     var d = data.taskCorr; if (!d || !d.names) return null;
     var n = d.names.length, wrap = el("div"), box = el("div", "mx"), t = el("table");
@@ -747,14 +760,16 @@ details.allruns .tablebox { margin-top: 8px; }
         var lc = buildControl();
         if (!lc) return;
         var lb = el("div", "fig"); lb.style.gridColumn = "1 / -1";
-        lb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) lb.appendChild(el("p", "fig-why", f.why)); lb.appendChild(lc);
+        lb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) lb.appendChild(el("p", "fig-why", f.why));
+        var lg = legendEl(f.legend); if (lg) lb.appendChild(lg); lb.appendChild(lc);
         wrap.appendChild(lb); any = true; return;
       }
       if (f.type === "alltasks") {
         var tbl = buildAllTasks();
         if (!tbl) return;
         var tb0 = el("div", "fig"); tb0.style.gridColumn = "1 / -1";
-        tb0.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) tb0.appendChild(el("p", "fig-why", f.why)); tb0.appendChild(tbl);
+        tb0.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) tb0.appendChild(el("p", "fig-why", f.why));
+        var lg0 = legendEl(f.legend); if (lg0) tb0.appendChild(lg0); tb0.appendChild(tbl);
         wrap.appendChild(tb0); any = true; return;
       }
       var ch = buildChart(famJobs, f.plot, f.panel == null ? "" : f.panel);
@@ -840,6 +855,7 @@ details.allruns .tablebox { margin-top: 8px; }
       markBest(marks.fresh, -1); markBest(marks.fit, -1); markBest(marks.orth, -1); markBest(marks.ret, 1); markBest(marks.fin, 1); markBest(marks.bst, 1);
       t.appendChild(tb); box.appendChild(t);
       box.appendChild(el("p", "chartnote", "Bold: the best value of the column (highest return, lowest error). The start column is not ranked."));
+      if (info.setup) { var su = el("p", "setup"); su.appendChild(el("b", null, "Setup. ")); su.appendChild(document.createTextNode(info.setup)); panel.appendChild(su); }
       if (info.summary) panel.appendChild(el("p", "summary", info.summary));
       var figs = renderFigures(fams[fk], info);
       if (figs) panel.appendChild(figs);

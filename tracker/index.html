@@ -678,9 +678,34 @@ details.allruns .tablebox { margin-top: 8px; }
     tt.appendChild(b2); tb.appendChild(tt); det.appendChild(tb); wrap.appendChild(det);
     return wrap;
   }
+  function buildControl() {     // return with the latent inferred from labels against a random latent: what the task latent contributes
+    var d = data.evalTasks; if (!d || !d.control) return null;
+    var tasks = d.tasks, box = el("div", "tablebox"), t = el("table"), h1 = el("tr"), h2 = el("tr");
+    h1.appendChild(el("th", null, "")); d.control.groups.forEach(function (g) { var c = el("th", "num", g.label); c.colSpan = 3; h1.appendChild(c); });
+    h2.appendChild(el("th", null, "Task"));
+    d.control.groups.forEach(function () { ["latent", "random", "gain"].forEach(function (x) { h2.appendChild(el("th", "num", x)); }); });
+    var th = el("thead"); th.appendChild(h1); th.appendChild(h2); t.appendChild(th);
+    var tb = el("tbody");
+    tasks.forEach(function (tk) {
+      var tr = el("tr"); tr.appendChild(el("td", null, tk));
+      d.control.groups.forEach(function (g) {
+        var a = g.fresh[tk], b = g.random[tk];
+        tr.appendChild(el("td", "num", a == null ? "" : String(Math.round(a)))); tr.appendChild(el("td", "num", b == null ? "" : String(Math.round(b))));
+        var dl = (a == null || b == null) ? null : a - b, c = el("td", "num");
+        if (dl != null) c.appendChild(el("span", Math.abs(dl) < 40 ? "flat" : (dl > 0 ? "up" : "down"), (dl >= 0 ? "+" : "") + Math.round(dl)));
+        tr.appendChild(c);
+      });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); box.appendChild(t);
+    var wrap = el("div", "alltasks"); wrap.appendChild(box);
+    wrap.appendChild(el("p", "chartnote", "latent: the latent inferred from labelled states of the task; random: a random vector on the sphere; gain = latent minus random. Grey: within 40."));
+    return wrap;
+  }
   function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)
     var d = data.evalTasks; if (!d || !d.rows || !d.rows.length) return null;
     var tasks = d.tasks, base = null;
+    d.rows = d.rows.filter(function (r) { return !r.random; });
     d.rows.forEach(function (r) { if (r.name === "pretrained model") base = r; });
     var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
     ["Configuration", "runs"].concat(tasks).forEach(function (h, i) { hr.appendChild(el("th", i > 0 ? "num" : null, h)); });
@@ -717,6 +742,13 @@ details.allruns .tablebox { margin-top: 8px; }
         var mb = el("div", "fig"); mb.style.gridColumn = "1 / -1";
         mb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) mb.appendChild(el("p", "fig-why", f.why)); mb.appendChild(mx);
         wrap.appendChild(mb); any = true; return;
+      }
+      if (f.type === "latentcontrol") {
+        var lc = buildControl();
+        if (!lc) return;
+        var lb = el("div", "fig"); lb.style.gridColumn = "1 / -1";
+        lb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) lb.appendChild(el("p", "fig-why", f.why)); lb.appendChild(lc);
+        wrap.appendChild(lb); any = true; return;
       }
       if (f.type === "alltasks") {
         var tbl = buildAllTasks();

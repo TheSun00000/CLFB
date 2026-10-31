@@ -59,6 +59,22 @@ for j in snap.values():
 doc = {'tasks': tasks, 'rows': [{'name': name, 'runs': len({s_ for s_, _ in rs}), 'order': (-1 if name == 'pretrained model' else order.get(name, 99)),
                                  'values': {t: round(cell(rs, t), 1) for t in tasks if cell(rs, t) is not None}} for name, rs in rows.items()]}
 doc['rows'].sort(key=lambda r: (r['order'], r['name']))
+for r in doc['rows']:
+    r['random'] = r['name'].endswith('[random latent]')
+# the latent control: same checkpoints, latent from fresh labels vs a random latent
+def cfg(name, label):
+    f = [r for r in doc['rows'] if r['name'] == name]
+    g = [r for r in doc['rows'] if r['name'] == name + ' [random latent]']
+    return {'label': label, 'runs': f[0]['runs'] if f else 0, 'fresh': f[0]['values'] if f else {}, 'random': g[0]['values'] if g else {}}
+trained = [r['name'] for r in doc['rows'] if not r['random'] and r['name'] != 'pretrained model']
+def avg(key):
+    out = {}
+    for t in tasks:
+        v = [r['values'][t] for r in doc['rows'] if r['name'] in trained + [n + ' [random latent]' for n in trained] and r['random'] == (key == 'random') and t in r['values']]
+        if v: out[t] = round(st.mean(v), 1)
+    return out
+doc['control'] = {'groups': [cfg('pretrained model', 'Pretrained model'), cfg('lam 100, focus 1.0, noise 0.2', 'Base run (focus 1.0), 4 runs'),
+                             {'label': 'All %d fine-tuned configurations (mean)' % len(trained), 'runs': len(trained), 'fresh': avg('fresh'), 'random': avg('random')}]}
 with open('hpc/status/eval_all_tasks.json', 'w') as f:
     json.dump(doc, f)
 print('%-62s %4s ' % ('configuration', 'runs') + ' '.join('%7s' % t[:7] for t in tasks))

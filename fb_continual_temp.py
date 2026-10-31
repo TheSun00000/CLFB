@@ -9,6 +9,10 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
     rec_prefit=0      1 (continual mode): at the start of the stage, run fit_backward_to_reward (B alone, fixed readout, rfit_* flags) before the
                          joint training; an evaluation tagged 'prefit' is logged at step 0 afterwards. Tests whether the joint objective keeps the fit.
     eval_rollouts=1   0: no rollouts in the evaluations (returns are NaN), only the reward-reconstruction columns: much faster evals.
+    eval_ckpt=<path>  EVAL-ONLY mode: no training. Loads a checkpoint written by a run of this script (models/<run>/fb_stage_<k>_<task>.pickle, or any pickle with
+                         fb_params and actor_params, e.g. the pretrained one), evaluates ALL the benchmark tasks of the env zero-shot (latent from fresh labels,
+                         num_evals episodes each) and the stored latents of the stream tasks (tracked), writes eval_log.csv (tag eval_only) and exits.
+                         The log folder is logs/<time>_FBeval-<env>-<tasks>; info.txt holds the source checkpoint. tasks= should be the stream the checkpoint was trained on.
     eval_stream_only=0  1: the fresh zero-shot evaluation (rollouts and reward-reconstruction stats) covers only the tasks of the stream, not
                          all the benchmark tasks of the env (the other columns are left empty): 5x fewer environments per evaluation.
     ztask_bs=0        >0: the task latent z_k of z_task_frac / actor_z_task_frac is re-encoded at every step on a random minibatch of this many
@@ -250,7 +254,8 @@ if __name__ == '__main__':
     EVAL_N          = 10_000      # number of states for the eval-time reward / reconstruction statistics
     EVAL_FRESH      = bool(int(kwargs['eval_fresh'])) if 'eval_fresh' in kwargs else True
     EVAL_ROLLOUTS   = bool(int(kwargs['eval_rollouts'])) if 'eval_rollouts' in kwargs else True
-    EVAL_STREAM_ONLY = bool(int(kwargs['eval_stream_only'])) if 'eval_stream_only' in kwargs else False
+    EVAL_CKPT       = str(kwargs['eval_ckpt']) if 'eval_ckpt' in kwargs else None
+    EVAL_STREAM_ONLY = bool(int(kwargs['eval_stream_only'])) if 'eval_stream_only' in kwargs and not EVAL_CKPT else False
     REC_PREFIT      = bool(int(kwargs['rec_prefit'])) if 'rec_prefit' in kwargs else False
 
     # ── Single-task fine-tuning ───────────────────────────────────────────────────
@@ -269,7 +274,9 @@ if __name__ == '__main__':
     now = datetime.now()
     date_time_str = now.strftime("%Y-%m-%d_%H-%M-%S")
 
-    if FINETUNE == 'none':
+    if EVAL_CKPT:
+        exp_name = f'FBeval-{ENV_NAME}-' + '+'.join(TASKS)
+    elif FINETUNE == 'none':
         exp_name = f'FBcontinual-{ENV_NAME}-' + '+'.join(TASKS)
     else:
         exp_name = f'FBfinetune-{FINETUNE}-{ENV_NAME}-' + '+'.join(TASKS)
@@ -1646,6 +1653,18 @@ if __name__ == '__main__':
             pickle.dump(state_dict, params_file)
 
     # ── Continual training ────────────────────────────────────────────────────────
+
+    if EVAL_CKPT:              # eval-only mode: every benchmark task, then exit
+        train_state = load_checkpoint(train_state, EVAL_CKPT)
+        with open(EVAL_CKPT, 'rb') as f:
+            ck = pickle.load(f)
+        lat = [jnp.asarray(z) for z in np.asarray(ck.get('latents', np.zeros((0, Z_DIM))))][:len(TASKS)]
+        m2e = [float(x) for x in np.asarray(ck.get('m2s', []))][:len(lat)]
+        with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
+            file.write(f'eval_only source={EVAL_CKPT} stored_latents={len(lat)} ckpt_tasks={ck.get("tasks")}\n')
+        print(f'eval-only: {EVAL_CKPT} ({len(lat)} stored latents)')
+        run_eval(train_state, 0, 0, 'eval_only', lat, m2e)
+        sys.exit(0)
 
     latents, m2s = [], []      # stored z_j (d numbers per task) and m2_j (evaluation only)
 

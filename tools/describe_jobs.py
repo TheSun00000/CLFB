@@ -98,7 +98,7 @@ def free_class(cmd):
             memb = [(pn, 'E3 phase 1' if ref else 'E3-like') for pn in HOME]
             memb += [('number of labels', '10k labels' + tag), ('task', 'run' + tag)]
             if ref:
-                memb += [(pn, 'E3 phase 1') for pn in FB_PANELS]
+                memb += [(pn, 'E3 phase 1 (reference)' if pn == 'headline' else 'E3 phase 1') for pn in FB_PANELS]
         else:
             memb = [(pn, key) for pn in FREE_PANELS.get(key, [])]
             if key == 'resolved readout':
@@ -125,7 +125,7 @@ def is_fb(cmd):
     return 'fb_continual_temp.py' in cmd and flag(cmd, 'steps_per_stage') == '500000' and flag(cmd, 'fb_objective') != '0'
 
 
-FB_PANELS = ['lam sweep, low', 'lam sweep, high', 'ortho_coef at lam 100', 'ortho_coef at lam 10', 'B-only prefit', 'readout and B lr (lam 100)', 'labels and task (lam 100)']
+FB_PANELS = ['headline', 'lam sweep', 'ortho_coef at lam 100', 'ortho_coef at lam 10', 'B-only prefit', 'readout and B lr (lam 100)', 'labels and task (lam 100)']
 
 
 def fb_parts(cmd):
@@ -152,11 +152,11 @@ def fb_class(cmd):
     L = int(float(lam))
     m = []                                               # (panel, series)
     if not mods:
-        if L in (0, 10, 30, 100): m.append(('lam sweep, low', 'lam %d' % L))
-        if L in (0, 100, 300, 1000): m.append(('lam sweep, high', 'lam %d' % L))
+        if L > 0: m.append(('lam sweep', 'lam %d' % L))
+        if L == 0: m.append(('headline', 'no L_rec (lam 0)'))
         if L == 100:
-            m += [('ortho_coef at lam 100', 'ortho 1'), ('B-only prefit', 'lam 100'), ('readout and B lr (lam 100)', 'fixed readout, lr x3 cosine'),
-                  ('labels and task (lam 100)', 'run, 10k labels')]
+            m += [('headline', 'lam 100, 10k labels'), ('ortho_coef at lam 100', 'ortho 1'), ('B-only prefit', 'lam 100'),
+                  ('readout and B lr (lam 100)', 'fixed readout, lr x3 cosine'), ('labels and task (lam 100)', 'run, 10k labels')]
         if L == 10:
             m += [('ortho_coef at lam 10', 'ortho 1'), ('B-only prefit', 'lam 10')]
     elif mods == ['prefit']:
@@ -165,10 +165,12 @@ def fb_class(cmd):
         m.append(('ortho_coef at lam %d' % L, mods[0]))
     elif mods == ['resolved readout']:
         m.append(('readout and B lr (lam 100)', 'resolved readout, lam %d' % L))
+        if L == 100: m.append(('headline', 'lam 100, 10k labels, resolved readout'))
     elif mods in (['lr x1 cosine'], ['lr x3 constant']):
         m.append(('readout and B lr (lam 100)', mods[0]))
     elif len(mods) == 1:
         m.append(('labels and task (lam 100)', mods[0]))
+        if mods[0] == '100k labels' and L == 100: m.append(('headline', 'lam 100, 100k labels'))
     if not m:
         m = [('', fb_variant(cmd))]
     order = 1 + L // 10 + (0 if not mods else 40 + len(mods[0]))
@@ -269,17 +271,56 @@ def describe(j):
 
 FAMILIES = {
     'frozen-b': ('Frozen B with the task latent', 1,
-                 'Walker run, 500k steps. B frozen, continual terms off. F and the actor train with z equal to the task latent plus angular noise (spread).'),
+                 'Does freezing B and training F and the actor on the task latent improve the return? Walker run, 500k updates.'),
     'oracle': ('Critic oracle (upper bound)', 2,
-               'Walker run, 200k steps. B frozen; F and the actor fine-tuned with the Q loss only. The TD target uses either the true task reward (oracle) or the implicit reward B Sigma^-1 z.'),
+               'How much can the critic gain from knowing the true reward? B frozen, Q loss only, walker run, 200k updates.'),
     'finetune': ('Fine-tuning FB vs TD3 references', 3,
-                 'Single-task adaptation of a pretrained FB (E1 actor only, E2 critic, E3 reward regression on B then critic) against TD3 from scratch on the two rewards the critics train on (R1 pretrained B, R2 fine-tuned B), for two label budgets. 1M steps.'),
+                 'How should a pretrained FB be adapted to one reward with few labels? E1 trains the actor only, E2 the critic with B frozen, E3 first fits B to the reward; R1 and R2 are TD3 from scratch on the same two rewards. Walker run, 1M updates.'),
     'finetune-ablation': ('E3 ablation: warm start, lr, tau', 5,
-                          'Walker run, 10k labels, 1M steps. E3 (finetune=reward_critic) with F and the actor re-initialised and/or the TD3 learning rate (3e-4) and target tau (0.005), to explain the gap to the TD3 reference R2. Two runs per variant.'),
-    'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 6,
-                    'Walker, one stage, mu_b=mu_q=0. Variants of the L_rec path of fb_continual_temp.py compared with E3 phase 1 (dashed lines) on how well B reconstructs the reward (held-out eps, log scale). Round 1 (60k updates, L_FB on or off, with returns), the free round (L_rec alone, 30k updates, 60 runs), and round 3 (L_FB and ortho on, 500k updates, with returns, orth_l2 and FB loss).'),
+                          'Why does E3 end below its TD3 reference R2 although both train on the same fitted reward? Walker run, 10k labels, 1M updates.'),
+    'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 0,
+                    "Can L_rec, the reward term of the continual method, fit the reward in B as well as the E3 reference (fit_backward_to_reward) while L_FB and the orthonormality term stay active? Walker run, one stage."),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
+}
+
+# what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
+EXTRA = {
+    'frozen-b': {
+        'summary': 'Training F and the actor with B and the task latent frozen gives only a small gain: the return goes from about 340 to 360-370.',
+        'figures': [{'plot': 'return', 'panel': '', 'title': 'Return during training',
+                     'why': 'Does adding noise around the task latent (spread 0.2, against exactly the latent) change anything? Both end near 360-370 and the three runs of each overlap.'}]},
+    'oracle': {
+        'summary': 'With B frozen, a critic trained on the true reward ends around 390 on average, against about 350 with the implicit reward. Two runs each and a large spread between runs: the gain over the pretrained 345 is modest either way.',
+        'figures': [{'plot': 'return', 'panel': '', 'title': 'Return during training',
+                     'why': 'Does knowing the true reward help the critic more than the implicit reward B Sigma^-1 z? The true reward ends at 379 and 403, the implicit one at 308 and 398 (two runs each): a hint, not a difference we can rely on.'}]},
+    'finetune': {
+        'summary': 'Only the variants that fit B to the reward improve clearly: E3 reaches 420-440 and TD3 on the fine-tuned reward (R2) 475-485, while the actor-only and frozen-B critic variants stay around or below the pretrained 345. The ranking is the same with 10k and 100k labels.',
+        'figures': [{'plot': 'return', 'panel': '10k labels', 'title': 'Return, 10k labeled states',
+                     'why': 'Which way of adapting works best with few labels? The two curves that rise (E3 and R2) are the ones where B was fitted to the reward.'},
+                    {'plot': 'return', 'panel': '100k labels', 'title': 'Return, 100k labeled states',
+                     'why': 'Do ten times more labels change the ranking? No: the order is the same and the final returns are within about 20.'}]},
+    'finetune-ablation': {
+        'summary': 'Re-initialising F and the actor helps (about 450 against 438 for E3), the TD3 learning rate and target tau alone do not, and none of the variants reaches R2 (485): the gap is not explained by one factor.',
+        'figures': [{'plot': 'return', 'panel': '', 'title': 'Return during training',
+                     'why': 'Which difference between E3 and TD3 (warm start, learning rate and tau, or both) explains the gap? Two runs per variant; the spread between runs is up to 30.'}]},
+    'lrec-vs-fit': {
+        'summary': 'With L_FB switched off, L_rec alone already matches the reference (epsilon 0.030 against 0.032, over 60 runs). With L_FB and the orthonormality term on, it does so with 100k labeled states (epsilon 0.026, B still orthonormal, FB loss intact). With 10k labels it gets to 0.04-0.05 within 25k updates and then drifts up to 0.09-0.14, because the fixed labeled set is overfit; only the resolved readout stays flat (0.06).',
+        'figures': [
+            {'plot': 'eps', 'panel': 'headline', 'title': 'Does L_rec fit the reward as well as the reference?',
+             'why': 'Error of the reward reconstruction on held-out states (lower is better); the dashed line is the E3 reference. With 100k labels L_rec reaches it and stays; with 10k labels it gets close early and then drifts up; without L_rec the reward is lost.'},
+            {'plot': 'orth', 'panel': 'headline', 'title': 'Is B still orthonormal?',
+             'why': 'The orthonormality error of B (the pretrained model is at 0.43). It stays at 0.43-0.48 in every run, so fitting the reward does not break the FB structure.'},
+            {'plot': 'fb', 'panel': 'headline', 'title': 'Is the FB objective still being optimised?',
+             'why': 'The FB loss keeps improving with L_rec: it ends at -300 to -308, against -312 without L_rec, so the reward term costs the FB objective only a few points.'},
+            {'plot': 'return', 'panel': 'headline', 'title': 'What happens to the return?',
+             'why': 'F and the actor train on uniform z, not on this task, so the return is not expected to improve. It stays near the pretrained level (about 340), a little lower on average (300-330) with L_rec. Each point is 10 episodes, so the curves are noisy.'},
+            {'plot': 'eps', 'panel': 'lam sweep', 'title': 'Does the weight lam of L_rec matter?',
+             'why': 'lam 10 is too weak to hold the fit; from lam 30 to 1000 the curves are alike, so a larger weight does not stop the late rise.'},
+            {'plot': 'eps', 'panel': 'ortho_coef at lam 100', 'title': 'Does a weaker orthonormality term help?',
+             'why': 'A smaller ortho_coef (1 is the default) lowers epsilon (0.069 at 0.01 against 0.139 at 1, at 500k updates), but it costs orthonormality, shown next.'},
+            {'plot': 'orth', 'panel': 'ortho_coef at lam 100', 'title': 'What a weaker orthonormality term costs',
+             'why': 'The orthonormality error of B for the same runs: 1.0 at ortho_coef 0.1, 2.2 at 0.01 and 3.1 at 0, against 0.44 at the default.'}]},
 }
 
 
@@ -348,6 +389,7 @@ for raw, j in jobs.items():
     print(raw, j['status'], '|', fam, '|', var)
 print(n)
 fam_docs = {k: {'title': v[0], 'order': v[1], 'description': v[2]} for k, v in FAMILIES.items()}
-fam_docs['lrec-vs-fit'].update({'plots': ['eps', 'return', 'orth', 'fb'], 'table': 'eps',
-                                'plotPanels': {'orth': ['ortho term, no L_FB'] + FB_PANELS, 'fb': FB_PANELS}})
+for k, extra in EXTRA.items():
+    fam_docs[k].update(extra)
+fam_docs['lrec-vs-fit']['table'] = 'eps'
 json.dump(fam_docs, open('hpc/status/families.json', 'w'), indent=1)

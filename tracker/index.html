@@ -140,6 +140,7 @@ td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); o
 svg.chart { width: 100%; height: auto; display: block; }
 svg.chart .grid { stroke: var(--line); stroke-width: 1; }
 svg.chart .tick { fill: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+svg.chart .axlabel { fill: var(--muted); font-size: 12px; }
 svg.chart .endval { fill: var(--ink); font-size: 11px; font-family: var(--font-mono); }
 svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 .tip { position: absolute; top: 6px; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; font-size: 12px; min-width: 150px; z-index: 2; }
@@ -148,6 +149,14 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 .tip .row b { font-family: var(--font-mono); font-weight: 600; margin-left: auto; padding-left: 12px; }
 .tip .row span.nm { color: var(--muted); }
 .chartnote { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.fam .summary { font-size: 15px; max-width: 80ch; margin: 0 0 18px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 4px 4px 0; }
+.figs { display: grid; gap: 26px 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); margin: 4px 0 18px; }
+.figs > * { min-width: 0; }
+.fig-title { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.fig-why { color: var(--muted); font-size: 13.5px; margin: 0 0 8px; max-width: 62ch; }
+details.allruns { margin-top: 14px; }
+details.allruns > summary { cursor: pointer; color: var(--muted); font-weight: 500; padding: 6px 0; }
+details.allruns .tablebox { margin-top: 8px; }
 .empty { border: 1px dashed var(--line); border-radius: 6px; padding: 28px 20px; color: var(--muted); text-align: center; background: var(--surface); }
 .empty b { color: var(--ink); display: block; margin-bottom: 4px; font-weight: 600; }
 
@@ -285,8 +294,8 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 </section>
 
 <section id="results" hidden>
-  <div class="head"><div><h2>Results</h2><p>Finished runs grouped by family and configuration. Repeats of one configuration are averaged.</p></div></div>
-  <p class="note" id="resNote">The ± is the standard deviation across runs when a configuration has several, and the rollout standard deviation of the single run otherwise (marked "1 run").</p>
+  <div class="head"><div><h2>Results</h2><p>One family per question we asked: the answer first, then the figures behind it.</p></div></div>
+  <p class="note" id="resNote">Each family asks one question. A highlighted sentence gives the answer, the figures show it, and the table of every run is folded at the bottom (± is the standard deviation across runs, or the rollout standard deviation for a single run).</p>
   <div class="stack" id="resOut"></div>
 </section>
 
@@ -457,8 +466,8 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 
   function drawChart(title, series, opts) {
     opts = opts || {};
-    var FMT = opts.fmt || function (v) { return v.toFixed(1); }, FMT0 = opts.fmt || function (v) { return v.toFixed(0); };
-    var W = 520, H = 280, L = 44, R = 50, T = 12, B = 34, pw = W - L - R, ph = H - T - B;
+    var FMT = opts.fmt || function (v) { return v.toFixed(1); }, FMT0 = opts.fmt0 || opts.fmt || function (v) { return v.toFixed(0); };
+    var W = 520, H = 280, L = opts.ylabel ? 60 : 44, R = 50, T = 12, B = 38, pw = W - L - R, ph = H - T - B;
     var xmax = 0, lo = Infinity, hi = -Infinity;
     series.forEach(function (s) { if (!s.ref) xmax = Math.max(xmax, s.agg.steps[s.agg.steps.length - 1]); });
     series.forEach(function (s) {      // a reference is a horizontal dashed line at its last value, over the whole axis
@@ -488,11 +497,12 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     var i;
     yticks.forEach(function (yv) {
       svg.appendChild(sv("line", { x1: L, x2: W - R, y1: Y(yv), y2: Y(yv), "class": "grid" }));
-      svg.appendChild(sv("text", { x: L - 8, y: Y(yv) + 4, "text-anchor": "end", "class": "tick" }, opts.log ? String(Number(yv.toPrecision(1))) : String(Math.round(yv))));
+      svg.appendChild(sv("text", { x: L - 8, y: Y(yv) + 4, "text-anchor": "end", "class": "tick" }, opts.log ? String(Number(yv.toPrecision(1))) : yv.toFixed(Math.max(0, -Math.floor(Math.log10(ystep) + 1e-9)))));
     });
     var nx = Math.floor(xmax / xstep + 1e-9);
     for (i = 0; i <= nx; i++) svg.appendChild(sv("text", { x: X(i * xstep), y: H - B + 18, "text-anchor": "middle", "class": "tick" }, fmtStep(i * xstep)));
-    svg.appendChild(sv("text", { x: W - R, y: H - 4, "text-anchor": "end", "class": "tick" }, "training steps"));
+    svg.appendChild(sv("text", { x: L + pw / 2, y: H - 3, "text-anchor": "middle", "class": "axlabel" }, "training updates"));
+    if (opts.ylabel) svg.appendChild(sv("text", { x: 13, y: T + ph / 2, "text-anchor": "middle", "class": "axlabel", transform: "rotate(-90 13 " + (T + ph / 2) + ")" }, opts.ylabel));
     series.forEach(function (s) {
       var a = s.agg;
       if (a.n > 1 && !opts.log) {
@@ -578,58 +588,54 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
   }
 
   var PLOTS = {
-    "return": { title: "Return", get: function (c) { return c.steps ? c : null; }, fmt: null, log: false },
+    "return": { title: "Return", get: function (c) { return c.steps ? c : null; }, fmt: null, log: false, ylabel: "return (higher is better)" },
     eps: { title: "Reward reconstruction error on held-out states (eps, log scale)", get: function (c) { return c.eps ? { steps: c.eps.steps, mean: c.eps.v } : null; },
-           fmt: function (v) { return v.toFixed(3); }, log: true },
+           fmt: function (v) { return v.toFixed(3); }, log: true, ylabel: "reward error ε (log, lower is better)" },
     fb: { title: "FB loss during training (fb_loss; the control without L_rec is the reference level)", get: function (c) { return c.fb ? { steps: c.fb.steps, mean: c.fb.v } : null; },
-          fmt: function (v) { return v.toFixed(2); }, log: false },
+          fmt: function (v) { return v.toFixed(2); }, fmt0: function (v) { return v.toFixed(0); }, log: false, ylabel: "FB loss (lower is better)" },
     orth: { title: "Orthonormality error of B during training (orth_l2)", get: function (c) { return c.orth ? { steps: c.orth.steps, mean: c.orth.v } : null; },
-            fmt: function (v) { return v.toFixed(2); }, log: false }
+            fmt: function (v) { return v.toFixed(2); }, log: false, ylabel: "orthonormality error of B" }
   };
   function panelsOf(j) { return String(j.panel || "").split("|"); }
   function seriesIn(j, pn) {      // 'series' can hold one name per panel, separated by '|'
     var ps = panelsOf(j), ss = String(j.series || "").split("|"), k = ps.indexOf(pn);
     return ss.length === ps.length && k >= 0 ? ss[k] : ss[0];
   }
-  function renderCharts(famJobs, info) {
-    if (!loaded.curves) return null;
-    var keys = (info && info.plots) || ["return"], wrap = el("div"), any = false;
-    keys.forEach(function (pk) {
-      var m = PLOTS[pk]; if (!m) return;
-      var list = famJobs.filter(function (j) { return data.curves[j.jobId] && m.get(data.curves[j.jobId]); });
-      if (!list.length) return;
-      var firstOrder = {};
-      list.forEach(function (j) { panelsOf(j).forEach(function (pn) { if (firstOrder[pn] == null || j.order < firstOrder[pn]) firstOrder[pn] = j.order; }); });
-      var allowed = info && info.plotPanels && info.plotPanels[pk];
-      var panels = Object.keys(firstOrder).filter(function (pn) { return pn && (!allowed || allowed.indexOf(pn) >= 0); })
-        .sort(function (a, b) { return firstOrder[a] - firstOrder[b]; });
-      var grid = el("div", "charts");
-      panels.forEach(function (pn) {
-        var inP = list.filter(function (j) { return panelsOf(j).indexOf(pn) >= 0; });
-        var ord = {};
-        inP.forEach(function (j) { var sn = seriesIn(j, pn); if (!j.ref && (ord[sn] == null || j.order < ord[sn])) ord[sn] = j.order; });
-        var names = Object.keys(ord).sort(function (a, b) { return ord[a] - ord[b]; }).slice(0, 5), series = [];
-        function runsOf(nm, ref) { return inP.filter(function (j) { return !!j.ref === ref && seriesIn(j, pn) === nm; }).map(function (j) { return m.get(data.curves[j.jobId]); }); }
-        names.forEach(function (nm, idx) {
-          var runs = runsOf(nm, false);
-          if (runs.length) series.push({ name: nm, color: "var(--s" + (idx + 1) + ")", agg: aggregate(runs) });
-        });
-        var refs = {};
-        inP.forEach(function (j) { if (j.ref) refs[seriesIn(j, pn)] = 1; });
-        Object.keys(refs).forEach(function (nm) {
-          var runs = runsOf(nm, true), partner = nm.replace(/ \(E3 phase 1\)$/, ""), pi = names.indexOf(partner);   // a reference shares the color of its partner line
-          if (runs.length && series.length) series.push({ name: nm, color: pi >= 0 ? "var(--s" + (pi + 1) + ")" : "var(--muted)", ref: true, agg: aggregate(runs) });
-        });
-        if (series.length) grid.appendChild(drawChart(pn, series, { log: m.log, fmt: m.fmt }));
-      });
-      if (!grid.firstChild) return;
-      any = true;
-      if (keys.length > 1) wrap.appendChild(el("h4", "chart-title", m.title));
-      wrap.appendChild(grid);
+  function buildChart(famJobs, pk, pn) {     // one chart: the metric pk of the runs that belong to panel pn
+    var m = PLOTS[pk]; if (!m || !loaded.curves) return null;
+    var list = famJobs.filter(function (j) { return data.curves[j.jobId] && m.get(data.curves[j.jobId]) && panelsOf(j).indexOf(pn) >= 0; });
+    if (!list.length) return null;
+    var ord = {};
+    list.forEach(function (j) { var sn = seriesIn(j, pn); if (!j.ref && (ord[sn] == null || j.order < ord[sn])) ord[sn] = j.order; });
+    var names = Object.keys(ord).sort(function (a, b) { return ord[a] - ord[b]; }).slice(0, 5), series = [];
+    function runsOf(nm, ref) { return list.filter(function (j) { return !!j.ref === ref && seriesIn(j, pn) === nm; }).map(function (j) { return m.get(data.curves[j.jobId]); }); }
+    names.forEach(function (nm, idx) {
+      var runs = runsOf(nm, false);
+      if (runs.length) series.push({ name: nm, color: "var(--s" + (idx + 1) + ")", agg: aggregate(runs) });
+    });
+    var refs = {};
+    list.forEach(function (j) { if (j.ref) refs[seriesIn(j, pn)] = 1; });
+    Object.keys(refs).forEach(function (nm) {
+      var runs = runsOf(nm, true), partner = nm.replace(/ \(E3 phase 1\)$/, ""), pi = names.indexOf(partner);   // a reference shares the color of its partner line
+      if (runs.length && series.length) series.push({ name: nm, color: pi >= 0 ? "var(--s" + (pi + 1) + ")" : "var(--muted)", ref: true, agg: aggregate(runs) });
+    });
+    return series.length ? drawChart("", series, { log: m.log, fmt: m.fmt, fmt0: m.fmt0, ylabel: m.ylabel }) : null;
+  }
+  function renderFigures(famJobs, info) {     // the curated figures of a family: a title, one sentence on why they are worth a look, the chart
+    var figs = (info && info.figures) || [], wrap = el("div", "figs"), any = false;
+    figs.forEach(function (f) {
+      var ch = buildChart(famJobs, f.plot, f.panel == null ? "" : f.panel);
+      if (!ch) return;
+      var blk = el("div", "fig");
+      blk.appendChild(el("h4", "fig-title", f.title || ""));
+      if (f.why) blk.appendChild(el("p", "fig-why", f.why));
+      blk.appendChild(ch);
+      wrap.appendChild(blk); any = true;
     });
     if (!any) return null;
-    wrap.appendChild(el("p", "chartnote", "Lines are the mean over runs of one configuration; a shaded band (± std across runs) appears only when a linear-axis configuration has several runs. A dashed grey line is a reference. Hover or use the arrow keys for values."));
-    return wrap;
+    var box = el("div"); box.appendChild(wrap);
+    box.appendChild(el("p", "chartnote", "Each line is the mean over the runs of one configuration (the number of runs is in the legend). A dashed line is a reference. Hover, or use the arrow keys, for values."));
+    return box;
   }
 
   function renderResults() {
@@ -644,7 +650,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     }
     var fams = {};
     jobs.forEach(function (j) { (fams[j.family] = fams[j.family] || []).push(j); });
-    Object.keys(fams).sort(function (a, b) { return ((data.families[a] || {}).order || 99) - ((data.families[b] || {}).order || 99); }).forEach(function (fk) {
+    Object.keys(fams).sort(function (a, b) { var oa = (data.families[a] || {}).order, ob = (data.families[b] || {}).order; return (oa != null ? oa : 99) - (ob != null ? ob : 99); }).forEach(function (fk) {
       var info = data.families[fk] || {}, panel = el("div", "panel fam");
       panel.appendChild(el("h3", null, info.title || fk));
       if (info.description) panel.appendChild(el("p", null, info.description));
@@ -689,9 +695,11 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
         tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
         tb.appendChild(tr);
       });
-      t.appendChild(tb); box.appendChild(t); panel.appendChild(box);
-      var charts = renderCharts(fams[fk], info);
-      if (charts) panel.appendChild(charts);
+      t.appendChild(tb); box.appendChild(t);
+      if (info.summary) panel.appendChild(el("p", "summary", info.summary));
+      var figs = renderFigures(fams[fk], info);
+      if (figs) panel.appendChild(figs);
+      var det = el("details", "allruns"); det.appendChild(el("summary", null, "All runs and numbers (" + fams[fk].length + " runs)")); det.appendChild(box); panel.appendChild(det);
       out.appendChild(panel);
     });
   }

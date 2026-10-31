@@ -40,7 +40,7 @@ def _one(folder, task):
     for mean_c, std_c, start_tag in ((task + '_ft_mean', task + '_ft_std', 'ft_start'),
                                      (task + '_fresh_mean', task + '_fresh_std', 'baseline'),
                                      (task + '_mean', task + '_std', None)):
-        if mean_c in cols:
+        if mean_c in cols and any(_num(r.get(mean_c)) is not None for r in rows):    # the column can exist but be empty
             break
     else:
         return None
@@ -52,8 +52,13 @@ def _one(folder, task):
     start = next((v for r, v in pts if start_tag and r.get('tag') == start_tag), None)
     best = max(v for _, v in pts)
     step = int(float(last.get('step') or 0))
-    return {'task': task, 'final': round(final, 1), 'std': round(_num(last.get(std_c)) or 0.0, 1),
-            'step': step, 'best': round(best, 1), 'start': None if start is None else round(start, 1)}
+    out = {'task': task, 'final': round(final, 1), 'std': round(_num(last.get(std_c)) or 0.0, 1),
+           'step': step, 'best': round(best, 1), 'start': None if start is None else round(start, 1)}
+    for key, col in (('fresh_eps', task + '_fresh_eps'), ('fit_eps', task + '_fit_eps')):     # reward reconstruction at the last evaluation
+        v = _num(last.get(col))
+        if v is not None:
+            out[key] = round(v, 4)
+    return out
 
 
 def curve(job, max_points=150):
@@ -72,7 +77,7 @@ def curve(job, max_points=150):
     if not rows:
         return None
     for mean_c, std_c in ((task + '_ft_mean', task + '_ft_std'), (task + '_fresh_mean', task + '_fresh_std'), (task + '_mean', task + '_std')):
-        if mean_c in rows[0]:
+        if mean_c in rows[0] and any(_num(r.get(mean_c)) is not None for r in rows):
             break
     else:
         return None
@@ -104,4 +109,7 @@ def headline(job):
     if r['start'] is not None:
         extra.append('start %.1f' % r['start'])
     extra.append('best %.1f' % r['best'])
+    for key, name in (('fresh_eps', 'fresh eps'), ('fit_eps', 'fit eps')):
+        if key in r:
+            extra.append('%s %.4f' % (name, r[key]))
     return dict(r, text=text, extra=', '.join(extra))

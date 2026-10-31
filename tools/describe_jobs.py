@@ -342,15 +342,18 @@ FAMILIES = {
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 EXTRA = {
     'return-focus': {
+        'summary': 'Pointing the policy at the task works: with L_rec on (lam 100) the return reaches 431 ± 18 (4 runs, mean of the last 50k updates), against 340 at the start and 329 without focus, which is the range E3 needed 1M updates for (419-438), while L_FB and the orthonormality term stay active (eps 0.05, orth_l2 0.60 against 0.43). L_rec is necessary: without it the return falls to 250-300, and with lam 30 it is 290. The focus level (0.5-1.0), the noise (0-0.5) and whether F or only the actor sees the latent all give 395-434, within the noise; a larger Q-loss weight breaks the reward fit (213 at 1.0). The other tasks do not suffer, they improve; a control without L_rec and without focus is missing to say how much of that comes from the extra L_FB training alone.',
         'figures': [
             {'plot': 'return', 'panel': 'task focus', 'title': 'Does training on the task latent raise the return?',
              'why': 'Zero-shot return on run, with the latent inferred from fresh labels (higher is better). Focus is the share of the training z replaced by the task latent; 0 is the unfocused run of the previous round. For scale: the pretrained policy is at 340 and E3 reaches 419-438 after 1M updates.'},
+            {'type': 'alltasks', 'title': 'What happens to the other tasks?',
+             'why': 'Zero-shot return on every walker task at the end of training (latent inferred from fresh labels, 20 episodes), with the change from the pretrained model in colour. A policy pointed at run keeps the model general only if the other columns hold.'},
             {'plot': 'eps', 'panel': 'task focus', 'title': 'Does the task focus hurt the reward fit?',
-             'why': 'Held-out error of the reward reconstruction (lower is better; the E3 reference is 0.032). Pointing the policy at the task should not undo what L_rec learned.'},
+             'why': 'Held-out error of the reward reconstruction (lower is better; the E3 reference is 0.032). With the task focus it stays at 0.03-0.06, only a little above the unfocused run (0.036).'},
             {'plot': 'orth', 'panel': 'task focus', 'title': 'Is B still orthonormal?',
-             'why': 'Orthonormality error of B; the pretrained model is at 0.43 and the previous round stayed at 0.43-0.48.'},
+             'why': 'Orthonormality error of B (the pretrained model is at 0.43). The task focus pushes it up to 0.52-0.60, against 0.43-0.44 without focus: the price of pointing the policy at the task.'},
             {'plot': 'fb', 'panel': 'task focus', 'title': 'Is the FB objective still being optimised?',
-             'why': 'FB loss (lower is better); the previous round ended at -300 to -308.'},
+             'why': 'FB loss (lower is better). It falls further the more focus there is, but the training z differs between the curves, so the levels are not comparable; what matters is that it keeps improving.'},
             {'plot': 'return', 'panel': 'noise around the latent', 'title': 'How much noise around the task latent?',
              'why': 'Angular noise added to the task latent during training (0 = exactly the latent). Noise spreads the policy over neighbouring latents, which may help it on the latent inferred from fresh labels.'},
             {'plot': 'return', 'panel': 'who sees the task latent', 'title': 'Does F need the focus, or only the actor?',

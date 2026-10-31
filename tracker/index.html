@@ -150,6 +150,11 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 .tip .row span.nm { color: var(--muted); }
 .chartnote { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .fam .summary { font-size: 15px; max-width: 80ch; margin: 0 0 18px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 4px 4px 0; }
+.alltasks { margin: 0 0 22px; }
+.alltasks table { font-size: 13px; }
+.alltasks td.num, .alltasks th.num { text-align: right; white-space: nowrap; font-family: var(--font-mono); }
+.alltasks .up { color: var(--good); } .alltasks .down { color: var(--bad); } .alltasks .flat { color: var(--muted); }
+.alltasks tr.base td { background: var(--idle-soft); }
 .figs { display: grid; gap: 26px 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); margin: 4px 0 18px; }
 .figs > * { min-width: 0; }
 .fig-title { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
@@ -326,7 +331,7 @@ details.allruns .tablebox { margin-top: 8px; }
 <script>
 (function () {
   var ROUTES = ["overview", "experiments", "results", "updates", "next", "slides"];
-  var data = { jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
+  var data = { evalTasks: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
   var loaded = { jobs: false, tracking: false, families: false, curves: false, updates: false, todos: false, slides: false };
   var db = null, canWrite = false, deckIdx = 0;
 
@@ -621,9 +626,41 @@ details.allruns .tablebox { margin-top: 8px; }
     });
     return series.length ? drawChart("", series, { log: m.log, fmt: m.fmt, fmt0: m.fmt0, ylabel: m.ylabel }) : null;
   }
+  function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)
+    var d = data.evalTasks; if (!d || !d.rows || !d.rows.length) return null;
+    var tasks = d.tasks, base = null;
+    d.rows.forEach(function (r) { if (r.name === "pretrained model") base = r; });
+    var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
+    ["Configuration", "runs"].concat(tasks).forEach(function (h, i) { hr.appendChild(el("th", i > 0 ? "num" : null, h)); });
+    var th = el("thead"); th.appendChild(hr); t.appendChild(th);
+    var tb = el("tbody");
+    d.rows.forEach(function (r) {
+      var tr = el("tr", r === base ? "base" : null);
+      tr.appendChild(el("td", null, r.name)); tr.appendChild(el("td", "num", String(r.runs)));
+      tasks.forEach(function (tk) {
+        var v = r.values[tk], c = el("td", "num");
+        c.appendChild(document.createTextNode(v == null ? "" : String(Math.round(v))));
+        if (base && r !== base && v != null && base.values[tk] != null) {
+          var dl = v - base.values[tk], sp = el("span", Math.abs(dl) < 20 ? "flat" : (dl > 0 ? "up" : "down"), " " + (dl >= 0 ? "+" : "") + Math.round(dl));
+          c.appendChild(sp);
+        }
+        tr.appendChild(c);
+      });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); box.appendChild(t);
+    var wrap = el("div", "alltasks"); wrap.appendChild(box); return wrap;
+  }
   function renderFigures(famJobs, info) {     // the curated figures of a family: a title, one sentence on why they are worth a look, the chart
     var figs = (info && info.figures) || [], wrap = el("div", "figs"), any = false;
     figs.forEach(function (f) {
+      if (f.type === "alltasks") {
+        var tbl = buildAllTasks();
+        if (!tbl) return;
+        var tb0 = el("div", "fig"); tb0.style.gridColumn = "1 / -1";
+        tb0.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) tb0.appendChild(el("p", "fig-why", f.why)); tb0.appendChild(tbl);
+        wrap.appendChild(tb0); any = true; return;
+      }
       var ch = buildChart(famJobs, f.plot, f.panel == null ? "" : f.panel);
       if (!ch) return;
       var blk = el("div", "fig");
@@ -792,7 +829,10 @@ details.allruns .tablebox { margin-top: 8px; }
       }, function () { loaded.jobs = true; renderAll(); });
       db.collection("snapshot").onSnapshot(function (snap) {      // the learning curves are split over snapshot/curves, curves_1, ... (document size limit)
         var all = {};
-        snap.docs.forEach(function (d) { if (d.id === "curves" || /^curves_\d+$/.test(d.id)) Object.assign(all, (d.data() || {}).curves || {}); });
+        snap.docs.forEach(function (d) {
+          if (d.id === "curves" || /^curves_\d+$/.test(d.id)) Object.assign(all, (d.data() || {}).curves || {});
+          if (d.id === "eval_all_tasks") data.evalTasks = d.data() || null;
+        });
         data.curves = all;
         loaded.curves = true; renderAll();
       }, function () { loaded.curves = true; renderAll(); });

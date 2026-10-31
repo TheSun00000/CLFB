@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Zero-shot return on every benchmark task of the eval-only runs (logs/*FBeval-*), one row per configuration of the source runs.
 
-Usage: tools/eval_summary.py  (after tools/sync_from_hpc.sh and tools/hpc_status.py --diff). Writes hpc/eval_all_tasks.csv and prints a table.
+Usage: tools/eval_summary.py  (after tools/sync_from_hpc.sh and tools/hpc_status.py --diff). Writes hpc/eval_all_tasks.csv, hpc/status/eval_all_tasks.json (the tracker document snapshot/eval_all_tasks) and prints a table.
 A source run is matched to its configuration by the run folder in the eval folder's info.txt (`eval_only source=models/<run folder>/...`).
 """
 import csv, glob, json, os, re, sys, statistics as st
@@ -17,8 +17,10 @@ by_folder = {f: j for j in snap.values() for f in (j.get('runFolders') or []) if
 
 def variant(folder):
     j = by_folder.get(folder)
-    if folder == 'PRETRAINED' or not j:
-        return 'pretrained model' if folder == 'PRETRAINED' else folder
+    if folder == 'PRETRAINED' or 'FBpretrain' in folder:
+        return 'pretrained model'
+    if not j:
+        return folder
     return classify(j)[1]
 
 
@@ -41,6 +43,16 @@ with open('hpc/eval_all_tasks.csv', 'w') as f:
     w = csv.writer(f); w.writerow(['configuration', 'runs'] + tasks)
     for name, rs in rows.items():
         w.writerow([name, len(rs)] + ['%.1f' % st.mean(r[t] for r in rs) for t in tasks])
+order = {}
+for j in snap.values():
+    for f in (j.get('runFolders') or []):
+        if not j.get('children') and f in by_folder:
+            order[variant(f)] = classify(j)[2]
+doc = {'tasks': tasks, 'rows': [{'name': name, 'runs': len(rs), 'order': (-1 if name == 'pretrained model' else order.get(name, 99)),
+                                 'values': {t: round(st.mean(r[t] for r in rs), 1) for t in tasks}} for name, rs in rows.items()]}
+doc['rows'].sort(key=lambda r: (r['order'], r['name']))
+with open('hpc/status/eval_all_tasks.json', 'w') as f:
+    json.dump(doc, f)
 print('%-62s %4s ' % ('configuration', 'runs') + ' '.join('%7s' % t for t in tasks))
 for name, rs in sorted(rows.items(), key=lambda kv: (kv[0] != 'pretrained model', kv[0])):
     print('%-62s %4d ' % (name, len(rs)) + ' '.join('%7.0f' % st.mean(r[t] for r in rs) for t in tasks))

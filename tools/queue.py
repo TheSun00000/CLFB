@@ -12,6 +12,7 @@ because the cluster pulls it), written by `add` from a header and a list of shel
     tools/queue.py submit [--dry-run] [--notify]  # submit, in list order, every queued entry that fits in the free slots (--notify: desktop notification)
     tools/queue.py sync              # update done / failed from Slurm
     tools/queue.py requeue NAME      # put a failed/cancelled entry back in the queue
+    tools/queue.py prio NAME [NAME..]  # move queued entries to the front of the queue
 
 `submit` refuses to run if the local scripts are not pushed (the cluster would not have them). It pulls the repo on the cluster (fast-forward only).
 """
@@ -197,6 +198,16 @@ def submit(a):
         notify('submitted %d: %s%s' % (len(done), ', '.join(done), ('; %d failed' % len(bad)) if bad else ''))
 
 
+def prio(a):
+    """Move the named queued entries to the front of the queue, in the order given."""
+    q = load()
+    by = {e['name']: e for e in q['entries']}
+    front = [by[n] for n in a.names if n in by]
+    q['entries'] = front + [e for e in q['entries'] if e['name'] not in a.names]
+    save(q)
+    print('front of the queue:', [e['name'] for e in q['entries'] if e['state'] == 'queued'][:8])
+
+
 def requeue(a):
     q = load()
     for e in q['entries']:
@@ -214,8 +225,9 @@ def main():
     sp.add_parser('sync').set_defaults(f=sync)
     p = sp.add_parser('submit'); p.add_argument('--dry-run', action='store_true'); p.add_argument('--notify', action='store_true', help='desktop notification when something is submitted'); p.set_defaults(f=submit)
     p = sp.add_parser('requeue'); p.add_argument('name'); p.set_defaults(f=requeue)
+    p = sp.add_parser('prio'); p.add_argument('names', nargs='+'); p.set_defaults(f=prio)
     a = ap.parse_args()
-    if a.cmd in ('add', 'submit', 'sync', 'requeue'):
+    if a.cmd in ('add', 'submit', 'sync', 'requeue', 'prio'):
         _lock = lock()        # kept open until the process ends
     a.f(a)
 

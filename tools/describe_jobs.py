@@ -88,39 +88,45 @@ def kilo(n):
 
 
 def classify(j):
-    """(family, variant, order): jobs with the same family and variant are repeats of one configuration."""
+    """(family, variant, order, panel, series): jobs with the same family and variant are repeats of one configuration.
+    On the Results tab a panel is one chart and a series is one line of it (same series name = same color across panels)."""
     cmd = j['command'] or ''
     if 'fb_critic_oracle.py' in cmd:
         real = flag(cmd, 'q_true_reward')
-        return 'oracle', 'true reward' if real == '1' else 'implicit reward', 1 if real == '1' else 2
+        v = 'true reward' if real == '1' else 'implicit reward'
+        return 'oracle', v, 1 if real == '1' else 2, '', v
     if 'fb_continual.py' in cmd and flag(cmd, 'freeze_b') == '1':
         sp = flag(cmd, 'z_task_spread')
-        return 'frozen-b', 'spread %s' % sp, 1 if sp == '0.2' else 2
+        v = 'spread %s' % sp
+        return 'frozen-b', v, 1 if sp == '0.2' else 2, '', v
     task = flag(cmd, 'tasks') or flag(cmd, 'task') or ''
     suffix = '' if task == 'run' else ' (%s)' % task
     if 'offline_rl_approx.py' in cmd and flag(cmd, 'reward_approx') in ('true', 'lrec_detach', 'lrec_full', 'fixed_z', 'mlp'):
         ra, an = flag(cmd, 'reward_approx'), flag(cmd, 'approx_n')
         order = ['true', 'lrec_detach', 'lrec_full', 'fixed_z', 'mlp'].index(ra) * 10 + (0 if an is None or an == '100000' else 1)
-        return 'td3-learned', 'reward %s%s' % (ra, ', approx_n %s' % kilo(an) if an else ''), order
+        panel = ('approx_n %s' % kilo(an)) if an else 'true reward'
+        return 'td3-learned', 'reward %s%s' % (ra, ', approx_n %s' % kilo(an) if an else ''), order, panel, 'reward ' + ra
     if 'offline_rl_approx.py' in cmd:
         ra, an = flag(cmd, 'reward_approx'), flag(cmd, 'approx_n')
         ref = 'R1' if ra == 'fb_pretrained' else 'R2'
         name = 'R1 TD3 on pretrained-B reward' if ref == 'R1' else 'R2 TD3 on fine-tuned-B reward'
-        return 'finetune', '%s, %s labels%s' % (name, kilo(an), suffix), (4 if ref == 'R1' else 5) * 10 + (0 if an == '100000' else 1)
+        return ('finetune', '%s, %s labels%s' % (name, kilo(an), suffix), (4 if ref == 'R1' else 5) * 10 + (0 if an == '100000' else 1),
+                '%s labels%s' % (kilo(an), suffix), name)
     ft, nl = flag(cmd, 'finetune'), flag(cmd, 'n_labeled')
     idx = {'actor': 1, 'critic': 2, 'reward_critic': 3}[ft]
     name = {'actor': 'E1 actor only', 'critic': 'E2 critic (B frozen)', 'reward_critic': 'E3 reward regression + critic'}[ft]
-    return 'finetune', '%s, %s labels%s' % (name, kilo(nl), suffix), idx * 10 + (0 if nl == '100000' else 1)
+    return ('finetune', '%s, %s labels%s' % (name, kilo(nl), suffix), idx * 10 + (0 if nl == '100000' else 1),
+            '%s labels%s' % (kilo(nl), suffix), name)
 
 
 n = 0
 os.makedirs('hpc/status/tracking_family', exist_ok=True)
 for raw, j in jobs.items():
     t, d = describe(j)
-    fam, var, order = classify(j)
-    json.dump({'tracked': True, 'title': t, 'description': d, 'family': fam, 'variant': var, 'order': order},
+    fam, var, order, panel, series = classify(j)
+    json.dump({'tracked': True, 'title': t, 'description': d, 'family': fam, 'variant': var, 'order': order, 'panel': panel, 'series': series},
               open('hpc/status/tracking/%s.json' % raw, 'w'))
-    json.dump({'family': fam, 'variant': var, 'order': order}, open('hpc/status/tracking_family/%s.json' % raw, 'w'))
+    json.dump({'family': fam, 'variant': var, 'order': order, 'panel': panel, 'series': series}, open('hpc/status/tracking_family/%s.json' % raw, 'w'))
     n += 1
     print(raw, j['status'], '|', fam, '|', var)
 print(n)

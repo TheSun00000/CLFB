@@ -56,6 +56,40 @@ def _one(folder, task):
             'step': step, 'best': round(best, 1), 'start': None if start is None else round(start, 1)}
 
 
+def curve(job, max_points=150):
+    """Learning curve of a finished job: {'steps': [...], 'mean': [...], 'std': [...]} (same series as headline())."""
+    if job.get('status') != 'finished' or not job.get('runFolders'):
+        return None
+    task = _task(job.get('command'))
+    if not task:
+        return None
+    path = os.path.join(LOGS, job['runFolders'][-1], 'eval_log.csv')
+    try:
+        with open(path) as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return None
+    if not rows:
+        return None
+    for mean_c, std_c in ((task + '_ft_mean', task + '_ft_std'), (task + '_fresh_mean', task + '_fresh_std'), (task + '_mean', task + '_std')):
+        if mean_c in rows[0]:
+            break
+    else:
+        return None
+    pts = {}
+    for r in rows:
+        v = _num(r.get(mean_c))
+        if v is not None:
+            pts[int(float(r.get('step') or 0))] = (v, _num(r.get(std_c)) or 0.0)      # later rows win on a repeated step
+    if not pts:
+        return None
+    steps = sorted(pts)
+    if len(steps) > max_points:
+        keep = {steps[round(i * (len(steps) - 1) / (max_points - 1))] for i in range(max_points)}
+        steps = [s for s in steps if s in keep]
+    return {'steps': steps, 'mean': [round(pts[s][0], 1) for s in steps], 'std': [round(pts[s][1], 1) for s in steps]}
+
+
 def headline(job):
     """dict with a 'text' line for a finished job, or None (not finished, no log yet)."""
     if job.get('status') != 'finished' or not job.get('runFolders'):

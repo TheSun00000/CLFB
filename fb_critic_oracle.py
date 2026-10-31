@@ -25,7 +25,8 @@ Flags:
                    labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip
                            quadruped: stand walk run jump | pointmaze: goal_0_20 goal_20_20 goal_20_0 goal_4_4 goal_12_12
                            antmaze: goal_bottom ... (see `benchmarks` below)
-    seed=0 discount=0.95
+    seed=<int>               default: random (logged in info.txt)
+    discount=0.95
     steps_per_stage=100000   number of updates per stage (multiple of scan_length)
     scan_length=1000         updates per jitted chunk (= logging granularity)
     n_labeled=10000          size of the labeled set D_k of each task (sampled once per stage, fixed during the stage)
@@ -101,7 +102,7 @@ from flax import serialization
 import jax.numpy as jnp
 import optax
 
-from _utils.logs import parse_kwargs
+from _utils.logs import parse_kwargs, resolve_seed, run_info
 
 
 class CSVLogger:
@@ -200,7 +201,7 @@ if __name__ == '__main__':
     assert len(TASKS) >= 1, "tasks= must contain at least one task"
     assert len(set(TASKS)) == len(TASKS), f"tasks= must be unique, got {TASKS}"
 
-    SEED = int(kwargs['seed']) if 'seed' in kwargs else 0
+    SEED = resolve_seed(kwargs)
 
     # ── Continual hyper-parameters ────────────────────────────────────────────────
     STEPS_PER_STAGE = int(kwargs['steps_per_stage']) if 'steps_per_stage' in kwargs else 100_000
@@ -251,6 +252,7 @@ if __name__ == '__main__':
 
     with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
         file.write(str(kwargs) + '\n')
+        file.write(run_info())
 
     # ── Reward functions (jnp ports of new_utils/benchmark.py and utils/antmaze_benchmark.py) ──
     # Every reward function has the signature  fn(aux, param) -> array of shape aux.shape[:-1]

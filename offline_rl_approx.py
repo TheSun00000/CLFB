@@ -8,7 +8,7 @@ Same envs / datasets / eval as fb.py, but ONE reward function per env instead of
 Usage:
     python offline_rl_approx.py env_name=walker task=walk
     optional: task=<label or index in the benchmark list of the env>   (default: 0, the available labels are printed)
-              seed=0 discount=0.95
+              seed=<int> (default: random, logged in info.txt) discount=0.95
               bc_coef=0.0     (0 -> plain TD3 actor loss -Q.mean(); > 0 -> TD3+BC)
               n_transitions=100000 data_seed=0      (uniform subsample of the dataset, default: full dataset)
               eval_each_steps=10
@@ -82,7 +82,7 @@ from flax import serialization
 import jax.numpy as jnp
 import optax
 
-from _utils.logs import parse_kwargs
+from _utils.logs import parse_kwargs, resolve_seed, run_info
 
 
 class CSVLogger:
@@ -121,7 +121,7 @@ if __name__ == '__main__':
     assert ENV_NAME in ['cheetah', 'walker', 'quadruped', 'antmaze', 'pointmaze']
 
     # ── Config ────────────────────────────────────────────────────────────────────
-    SEED = int(kwargs['seed']) if 'seed' in kwargs else 0
+    SEED = resolve_seed(kwargs)
     N_TRANSITIONS = int(kwargs['n_transitions']) if 'n_transitions' in kwargs else None
     DATA_SEED     = int(kwargs['data_seed']) if 'data_seed' in kwargs else 0
 
@@ -187,6 +187,7 @@ if __name__ == '__main__':
 
     with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
         file.write(str(kwargs) + '\n')
+        file.write(run_info())
 
     # ── Reward functions (jnp ports of new_utils/benchmark.py and utils/antmaze_benchmark.py) ──
     # Every reward function has the signature  fn(aux, param) -> array of shape aux.shape[:-1]

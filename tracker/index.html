@@ -19,6 +19,7 @@
   --bad-soft: #fbe3e1;
   --idle: #5b6678;
   --idle-soft: #e9ecf1;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;   /* categorical slots, light */
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
@@ -28,6 +29,7 @@
     --accent: #6ea4f0; --accent-soft: #1c2d47;
     --good: #5fcf94; --good-soft: #163a29; --warn: #e8b04a; --warn-soft: #3a2e12;
     --bad: #f08a83; --bad-soft: #43201e; --idle: #99a5b8; --idle-soft: #232d3c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
     color-scheme: dark;
   }
 }
@@ -36,6 +38,7 @@
   --accent: #6ea4f0; --accent-soft: #1c2d47;
   --good: #5fcf94; --good-soft: #163a29; --warn: #e8b04a; --warn-soft: #3a2e12;
   --bad: #f08a83; --bad-soft: #43201e; --idle: #99a5b8; --idle-soft: #232d3c;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -127,6 +130,24 @@ td.wide { min-width: 280px; }
 td.pm { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; }
 td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .badge1 { color: var(--muted); font-size: 12px; }
+.charts { display: grid; gap: 22px 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); margin-top: 20px; }
+.charts > * { min-width: 0; }
+.chart-title { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.lk { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 6px; border-radius: 1px; }
+.chartscroll { overflow-x: auto; }
+.chartwrap { position: relative; min-width: 440px; max-width: 560px; }
+svg.chart { width: 100%; height: auto; display: block; }
+svg.chart .grid { stroke: var(--line); stroke-width: 1; }
+svg.chart .tick { fill: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+svg.chart .endval { fill: var(--ink); font-size: 11px; font-family: var(--font-mono); }
+svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
+.tip { position: absolute; top: 6px; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; font-size: 12px; min-width: 150px; z-index: 2; }
+.tip .st { font-family: var(--font-mono); color: var(--muted); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 4px; }
+.tip .row b { font-family: var(--font-mono); font-weight: 600; margin-left: auto; padding-left: 12px; }
+.tip .row span.nm { color: var(--muted); }
+.chartnote { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .empty { border: 1px dashed var(--line); border-radius: 6px; padding: 28px 20px; color: var(--muted); text-align: center; background: var(--surface); }
 .empty b { color: var(--ink); display: block; margin-bottom: 4px; font-weight: 600; }
 
@@ -296,8 +317,8 @@ td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); o
 <script>
 (function () {
   var ROUTES = ["overview", "experiments", "results", "updates", "next", "slides"];
-  var data = { jobs: [], meta: null, tracking: {}, families: {}, updates: [], todos: [], slides: [] };
-  var loaded = { jobs: false, tracking: false, families: false, updates: false, todos: false, slides: false };
+  var data = { jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
+  var loaded = { jobs: false, tracking: false, families: false, curves: false, updates: false, todos: false, slides: false };
   var db = null, canWrite = false, deckIdx = 0;
 
   function $(id) { return document.getElementById(id); }
@@ -409,11 +430,165 @@ td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); o
     return st.m.toFixed(1) + (sd != null ? " ± " + sd.toFixed(1) : "");
   }
 
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs, text) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function fmtStep(n) { if (n === 0) return "0"; if (n >= 1e6 && n % 1e6 === 0) return (n / 1e6) + "M"; return (n / 1e3) + "k"; }
+  function niceStep(span, maxTicks) {
+    var raw = span / maxTicks, mag = Math.pow(10, Math.floor(Math.log10(raw))), opts = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < opts.length; i++) if (opts[i] * mag >= raw) return opts[i] * mag;
+    return 10 * mag;
+  }
+  function aggregate(runs) {
+    var base = runs[0].steps.filter(function (s) { return runs.every(function (r) { return r.steps.indexOf(s) >= 0; }); });
+    var mean = [], sd = [];
+    base.forEach(function (s) {
+      var vals = runs.map(function (r) { return r.mean[r.steps.indexOf(s)]; }), st = stats(vals);
+      mean.push(st.m); sd.push(st.sd);
+    });
+    return { steps: base, mean: mean, sd: sd, n: runs.length };
+  }
+
+  function drawChart(title, series) {
+    var W = 520, H = 280, L = 44, R = 50, T = 12, B = 34, pw = W - L - R, ph = H - T - B;
+    var xmax = 0, lo = Infinity, hi = -Infinity;
+    series.forEach(function (s) {
+      var a = s.agg; xmax = Math.max(xmax, a.steps[a.steps.length - 1]);
+      a.mean.forEach(function (v, i) { var d = a.sd[i] != null ? a.sd[i] : 0; lo = Math.min(lo, v - d); hi = Math.max(hi, v + d); });
+    });
+    var ystep = niceStep((hi - lo) || 1, 5), y0 = Math.floor(lo / ystep) * ystep, y1 = Math.ceil(hi / ystep) * ystep;
+    var xstep = niceStep(xmax, 5);
+    function X(v) { return L + (v / xmax) * pw; }
+    function Y(v) { return T + ph - ((v - y0) / (y1 - y0)) * ph; }
+    var svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", tabindex: "0", "class": "chart",
+                          "aria-label": title + ": return versus training steps for " + series.map(function (s) { return s.name; }).join(", ") });
+    var ny = Math.round((y1 - y0) / ystep), i;
+    for (i = 0; i <= ny; i++) {
+      var yv = y0 + i * ystep;
+      svg.appendChild(sv("line", { x1: L, x2: W - R, y1: Y(yv), y2: Y(yv), "class": "grid" }));
+      svg.appendChild(sv("text", { x: L - 8, y: Y(yv) + 4, "text-anchor": "end", "class": "tick" }, String(Math.round(yv))));
+    }
+    var nx = Math.floor(xmax / xstep + 1e-9);
+    for (i = 0; i <= nx; i++) svg.appendChild(sv("text", { x: X(i * xstep), y: H - B + 18, "text-anchor": "middle", "class": "tick" }, fmtStep(i * xstep)));
+    svg.appendChild(sv("text", { x: W - R, y: H - 4, "text-anchor": "end", "class": "tick" }, "training steps"));
+    series.forEach(function (s) {
+      var a = s.agg;
+      if (a.n > 1) {
+        var up = a.steps.map(function (st, k) { return X(st) + "," + Y(a.mean[k] + a.sd[k]); });
+        var dn = a.steps.map(function (st, k) { return X(st) + "," + Y(a.mean[k] - a.sd[k]); }).reverse();
+        svg.appendChild(sv("polygon", { points: up.concat(dn).join(" "), style: "fill:" + s.color + ";fill-opacity:0.1" }));
+      }
+      svg.appendChild(sv("polyline", { points: a.steps.map(function (st, k) { return X(st) + "," + Y(a.mean[k]); }).join(" "),
+        style: "fill:none;stroke:" + s.color + ";stroke-width:2;stroke-linejoin:round;stroke-linecap:round" }));
+    });
+    var placed = [];
+    series.forEach(function (s) {
+      var a = s.agg, last = a.steps.length - 1, cx = X(a.steps[last]), cy = Y(a.mean[last]);
+      svg.appendChild(sv("circle", { cx: cx, cy: cy, r: 4, style: "fill:" + s.color + ";stroke:var(--surface);stroke-width:2" }));
+      if (series.length <= 4 && placed.every(function (p) { return Math.abs(p - cy) >= 12; })) {
+        placed.push(cy);
+        svg.appendChild(sv("text", { x: cx + 9, y: cy + 4, "class": "endval" }, a.mean[last].toFixed(0)));
+      }
+    });
+    var cross = sv("g", { visibility: "hidden" }), vline = sv("line", { y1: T, y2: T + ph, "class": "vline" });
+    cross.appendChild(vline);
+    var dots = series.map(function (s) {
+      var c = sv("circle", { r: 4, style: "fill:" + s.color + ";stroke:var(--surface);stroke-width:2" });
+      cross.appendChild(c); return c;
+    });
+    svg.appendChild(cross);
+    var hit = sv("rect", { x: L, y: T, width: pw, height: ph, fill: "transparent" });
+    svg.appendChild(hit);
+
+    var all = [];
+    series.forEach(function (s) { s.agg.steps.forEach(function (st) { if (all.indexOf(st) < 0) all.push(st); }); });
+    all.sort(function (p, q) { return p - q; });
+    var wrap = el("div", "chartwrap"), tip = el("div", "tip"), cur = -1;
+    tip.hidden = true;
+    function hide() { cur = -1; cross.setAttribute("visibility", "hidden"); tip.hidden = true; }
+    function show(k) {
+      cur = k;
+      var step = all[k], px = X(step);
+      vline.setAttribute("x1", px); vline.setAttribute("x2", px);
+      cross.setAttribute("visibility", "visible");
+      clear(tip);
+      tip.appendChild(el("div", "st", "step " + step.toLocaleString("en-US")));
+      series.forEach(function (s, j) {
+        var idx = s.agg.steps.indexOf(step);
+        if (idx < 0) { dots[j].setAttribute("visibility", "hidden"); return; }
+        dots[j].setAttribute("visibility", "visible"); dots[j].setAttribute("cx", px); dots[j].setAttribute("cy", Y(s.agg.mean[idx]));
+        var row = el("div", "row"), key = el("span", "lk"), nm = el("span", "nm", s.name);
+        key.style.background = s.color;
+        var val = el("b", null, s.agg.mean[idx].toFixed(1) + (s.agg.n > 1 ? " ± " + s.agg.sd[idx].toFixed(1) : ""));
+        row.appendChild(key); row.appendChild(nm); row.appendChild(val); tip.appendChild(row);
+      });
+      tip.hidden = false;
+      var rect = svg.getBoundingClientRect(), left = px * rect.width / W;
+      if (left > rect.width * 0.55) { tip.style.left = (left - 12) + "px"; tip.style.transform = "translateX(-100%)"; }
+      else { tip.style.left = (left + 12) + "px"; tip.style.transform = "none"; }
+    }
+    hit.addEventListener("pointermove", function (e) {
+      var rect = svg.getBoundingClientRect(), target = ((e.clientX - rect.left) * W / rect.width - L) / pw * xmax, best = 0;
+      for (var k = 1; k < all.length; k++) if (Math.abs(all[k] - target) < Math.abs(all[best] - target)) best = k;
+      show(best);
+    });
+    hit.addEventListener("pointerleave", hide);
+    svg.addEventListener("blur", hide);
+    svg.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { show(cur < 0 ? all.length - 1 : Math.min(all.length - 1, cur + 1)); e.preventDefault(); }
+      else if (e.key === "ArrowLeft") { show(cur < 0 ? all.length - 1 : Math.max(0, cur - 1)); e.preventDefault(); }
+      else if (e.key === "Escape") hide();
+    });
+    wrap.appendChild(svg); wrap.appendChild(tip);
+
+    var box = el("div"), legend = el("div", "legend");
+    if (title) box.appendChild(el("h4", "chart-title", title));
+    series.forEach(function (s) {
+      var item = el("span"), key = el("span", "lk");
+      key.style.background = s.color;
+      item.appendChild(key); item.appendChild(document.createTextNode(s.name + (s.agg.n > 1 ? " (" + s.agg.n + " runs)" : "")));
+      legend.appendChild(item);
+    });
+    var scroll = el("div", "chartscroll"); scroll.appendChild(wrap);
+    box.appendChild(legend); box.appendChild(scroll);
+    return box;
+  }
+
+  function renderCharts(famJobs) {
+    if (!loaded.curves) return null;
+    var withCurve = famJobs.filter(function (j) { return data.curves[j.jobId]; });
+    if (!withCurve.length) return null;
+    function minOrder(list, key) {
+      var o = {};
+      list.forEach(function (j) { var k = j[key]; if (o[k] == null || j.order < o[k]) o[k] = j.order; });
+      return Object.keys(o).sort(function (a, b) { return o[a] - o[b]; });
+    }
+    var names = minOrder(withCurve, "series").slice(0, 5), panels = minOrder(withCurve, "panel");
+    var grid = el("div", "charts");
+    panels.forEach(function (pn) {
+      var series = [];
+      names.forEach(function (nm, idx) {
+        var runs = withCurve.filter(function (j) { return j.panel === pn && j.series === nm; }).map(function (j) { return data.curves[j.jobId]; });
+        if (runs.length) series.push({ name: nm, color: "var(--s" + (idx + 1) + ")", agg: aggregate(runs) });
+      });
+      if (series.length) grid.appendChild(drawChart(pn, series));
+    });
+    if (!grid.firstChild) return null;
+    var wrap = el("div");
+    wrap.appendChild(grid);
+    wrap.appendChild(el("p", "chartnote", "Lines are the mean return over runs of one configuration; a shaded band (± std across runs) appears only when a configuration has several runs. Hover or use the arrow keys for values."));
+    return wrap;
+  }
+
   function renderResults() {
     var out = $("resOut"); clear(out);
     var jobs = data.jobs.map(function (j) {
       var t = data.tracking[j.jobId] || {};
-      return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0 });
+      return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0, panel: t.panel || "", series: t.series || t.variant || "" });
     }).filter(function (j) { return j.tracked && j.status === "finished" && j.results && j.family; });
     if (!jobs.length) {
       out.appendChild(empty(loaded.jobs ? "No finished results yet" : "Loading", loaded.jobs ? "Finished tracked runs with an evaluation log appear here, grouped by family." : ""));
@@ -446,7 +621,10 @@ td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); o
         tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
         tb.appendChild(tr);
       });
-      t.appendChild(tb); box.appendChild(t); panel.appendChild(box); out.appendChild(panel);
+      t.appendChild(tb); box.appendChild(t); panel.appendChild(box);
+      var charts = renderCharts(fams[fk]);
+      if (charts) panel.appendChild(charts);
+      out.appendChild(panel);
     });
   }
 
@@ -536,6 +714,11 @@ td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); o
         data.meta = { checkedAt: v.checkedAt };
         loaded.jobs = true; renderAll();
       }, function () { loaded.jobs = true; renderAll(); });
+      db.doc("snapshot/curves").onSnapshot(function (snap) {
+        var v = snap.exists ? (snap.data() || {}) : {};
+        data.curves = v.curves || {};
+        loaded.curves = true; renderAll();
+      }, function () { loaded.curves = true; renderAll(); });
       db.collection("families").onSnapshot(function (snap) {
         data.families = {};
         snap.docs.forEach(function (d) { data.families[d.id] = d.data() || {}; });

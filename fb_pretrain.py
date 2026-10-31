@@ -8,7 +8,7 @@ Usage:
 
 Flags:
     env_name=       cheetah | walker | quadruped | antmaze | pointmaze           (required)
-    seed=0
+    seed=<int>               default: random (logged in info.txt)
     num_steps=1000000        number of updates of THIS run (multiple of scan_length)
     checkpoint=              optional fb_agent_*.pickle to start from (fine-tune / continue). Logged 'step' then counts the
                              checkpoint's updates too (e.g. 800000 + ...), and a baseline evaluation is done at the start.
@@ -69,7 +69,7 @@ from flax import serialization
 import jax.numpy as jnp
 import optax
 
-from _utils.logs import parse_kwargs
+from _utils.logs import parse_kwargs, resolve_seed, run_info
 
 
 class CSVLogger:
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     ENV_NAME = kwargs['env_name']
     assert ENV_NAME in ['cheetah', 'walker', 'quadruped', 'antmaze', 'pointmaze']
 
-    SEED = int(kwargs['seed']) if 'seed' in kwargs else 0
+    SEED = resolve_seed(kwargs)
 
     NUM_STEPS       = int(kwargs['num_steps']) if 'num_steps' in kwargs else 1_000_000
     SCAN_LENGTH     = int(kwargs['scan_length']) if 'scan_length' in kwargs else 1_000
@@ -158,6 +158,7 @@ if __name__ == '__main__':
 
     with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
         file.write(str(kwargs) + '\n')
+        file.write(run_info())
 
     # ── Reward functions (jnp ports of new_utils/benchmark.py and utils/antmaze_benchmark.py) ──
     # Every reward function has the signature  fn(aux, param) -> array of shape aux.shape[:-1]

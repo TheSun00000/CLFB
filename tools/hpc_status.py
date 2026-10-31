@@ -7,11 +7,14 @@ the first lines of their .slurm_logs/*.out (command, run folder) and the tail of
 Finished jobs also get `results` (final / best return, see job_results.py) from the synced logs in hpc/logs.
 Writes hpc/status/jobs.json (all known jobs, keyed by job id) and prints a short summary.
 `--diff` also writes hpc/status/snapshot.json ({checkedAt, jobs}), the content of the tracker's document
-snapshot/jobs, and says whether it changed since the last push (`--mark-pushed` records the push).
+snapshot/jobs, and hpc/status/curves.json ({curves: {jobId: learning curve}}), the content of the document
+snapshot/curves; it says whether either changed since the last push (`--mark-pushed` records the push).
 The tracker flags (tracked, title, description) live apart, in the collection `tracking`, so a refresh never touches them.
 
+A desktop notification is sent when jobs start, finish, fail or are cancelled (one per job array and kind of change).
+
 Usage:
-    tools/hpc_status.py [--since 2026-10-30] [--diff] [--mark-pushed]
+    tools/hpc_status.py [--since 2026-10-30] [--diff] [--mark-pushed] [--no-notify] [--notify-dry]
 Exits quietly (code 0) when the HPC cannot be reached, so it is safe to run from a timer.
 """
 import argparse
@@ -32,6 +35,7 @@ OUT = os.path.join(ROOT, 'hpc', 'status')
 JOBS = os.path.join(OUT, 'jobs.json')
 PUSHED = os.path.join(OUT, 'pushed.json')       # hash of the job fields last pushed to the tracker
 SNAPSHOT = os.path.join(OUT, 'snapshot.json')
+CURVES = os.path.join(OUT, 'curves.json')       # content of the tracker's document snapshot/curves
 
 FINAL = {'COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'OUT_OF_MEMORY', 'NODE_FAIL', 'DEADLINE', 'BOOT_FAIL'}
 ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
@@ -133,6 +137,10 @@ def whole_digest(jobs):
     return hashlib.md5(''.join(sorted(r + digest(j) for r, j in jobs.items())).encode()).hexdigest()
 
 
+def curves_digest(c):
+    return hashlib.md5(json.dumps(c, sort_keys=True).encode()).hexdigest()
+
+
 def load(path, default):
     try:
         with open(path) as f:
@@ -141,17 +149,50 @@ def load(path, default):
         return default
 
 
+def transitions(before, fresh):
+    """{(array or job id, script, new status): [job ids]} for jobs whose status changed since the last check."""
+    out = {}
+    for raw, j in fresh.items():
+        new = j['status']
+        if before.get(raw) != new and new in ('running', 'finished', 'failed', 'cancelled'):
+            out.setdefault((j['arrayJob'] or raw, j['script'], new), []).append(raw)
+    return out
+
+
+def notify(trans, dry=False):
+    """One desktop notification per job array, listing how many jobs went to each status."""
+    by_array = {}
+    for (arr, script, status), ids in trans.items():
+        by_array.setdefault((arr, script), {})[status] = len(ids)
+    env = dict(os.environ)
+    env.setdefault('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/%d/bus' % os.getuid())
+    env.setdefault('DISPLAY', ':0')
+    for (arr, script), counts in by_array.items():
+        title = 'Jean Zay: job %s' % arr
+        body = '%s\n%s' % (script, ', '.join('%d %s' % (n, st) for st, n in sorted(counts.items())))
+        urgency = 'critical' if 'failed' in counts else 'normal'
+        if dry:
+            print('notify [%s] %s | %s' % (urgency, title, body.replace('\n', ' | ')))
+        else:
+            try:
+                subprocess.run(['notify-send', '-a', 'CLFB', '-u', urgency, title, body], env=env, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--since', default='2026-10-30', help='ignore jobs submitted before this date')
     ap.add_argument('--diff', action='store_true', help='write hpc/status/to_push.json')
+    ap.add_argument('--no-notify', action='store_true', help='do not send desktop notifications')
+    ap.add_argument('--notify-dry', action='store_true', help='print the notifications instead of sending them')
     ap.add_argument('--mark-pushed', action='store_true', help='record to_push.json as pushed to the tracker')
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
 
     if args.mark_pushed:
         with open(PUSHED, 'w') as f:
-            json.dump({'hash': whole_digest(load(JOBS, {}))}, f)
+            json.dump({'hash': whole_digest(load(JOBS, {})), 'curves': curves_digest(load(CURVES, {}))}, f)
         print('marked as pushed')
         return
 
@@ -170,11 +211,16 @@ def main():
         err = '\n'.join(l.rstrip() for l in ANSI.sub('', d.get('err') or '').splitlines() if l.strip()) if j['status'] == 'failed' else ''
         j.update({'command': d.get('command'), 'runFolders': d.get('runFolders') or [],
                   'lastLine': ANSI.sub('', d.get('lastLine') or '')[-200:], 'err': err[-900:]})
+    first_run = not os.path.exists(JOBS)
+    trans = transitions({r: j.get('status') for r, j in known.items()}, fresh)
     known.update(fresh)
     for j in known.values():          # headline numbers from the synced logs (run tools/sync_from_hpc.sh first)
         j['results'] = job_results.headline(j)
     with open(JOBS, 'w') as f:
         json.dump(known, f, indent=1, sort_keys=True)
+
+    if trans and not first_run and not args.no_notify:
+        notify(trans, dry=args.notify_dry)
 
     counts = {}
     for j in known.values():
@@ -182,10 +228,14 @@ def main():
     print('%d jobs:' % len(known), ', '.join('%s %d' % kv for kv in sorted(counts.items())))
 
     if args.diff:
-        changed = load(PUSHED, {}).get('hash') != whole_digest(known)
+        curves = {r: c for r, c in ((r, job_results.curve(j)) for r, j in known.items()) if c}
+        pushed = load(PUSHED, {})
+        changed = pushed.get('hash') != whole_digest(known) or pushed.get('curves') != curves_digest({'curves': curves})
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         with open(SNAPSHOT, 'w') as f:
             json.dump({'checkedAt': now, 'jobs': known}, f)
+        with open(CURVES, 'w') as f:
+            json.dump({'curves': curves}, f)
         print('changed since last push' if changed else 'no change since last push')
 
 if __name__ == '__main__':

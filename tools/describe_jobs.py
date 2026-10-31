@@ -335,12 +335,19 @@ FAMILIES = {
                      "Can the return reach the E3 level (419-438 after 1M updates; TD3 on the same reward 475-485) when F and the actor train partly on the task latent, with L_rec, L_FB and the orthonormality term all active? Walker run, 100k labels, 500k updates."),
     'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 0.5,
                     "Can L_rec, the reward term of the continual method, fit the reward in B as well as the E3 reference (fit_backward_to_reward) while L_FB and the orthonormality term stay active? Walker run, one stage."),
+    'task-design': ('Reward design: tasks that are not aligned with the built-in ones', -1,
+                    'Which new walker rewards are uncorrelated with stand, walk, vel8, run and flip, and with each other? 54 rewards (48 new, 6 from the first study) defined on the observation, evaluated on 100k dataset states, no training of anything.'),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
 }
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 EXTRA = {
+    'task-design': {
+        'standalone': True,
+        'summary': 'Almost all of the new rewards are nearly uncorrelated with the five built-in tasks (|corr| <= 0.1 for 34 of the 54 rewards, <= 0.25 for 41), because the built-ins are all functions of the same few quantities (velocity, uprightness, height). The ones that are correlated (0.4-0.9: head_low, standing_flail, tall, inverted, knee_high_*, hip_low, upright_spin, lean_b) are really about being upright or high and should be left out. The rest form small clusters (left/right mirror images; kicks and spins; jump, fall and hop; flamingo and airborne; the leg-posture family), so a set should take one reward per cluster.',
+        'figures': [{'type': 'matrix', 'title': 'How correlated are the rewards?',
+                     'why': 'Absolute Pearson correlation of the rewards over 100k dataset states (darker = more alike; hover for the value). Rows and columns are ordered by similarity, so blocks on the diagonal are groups of rewards that mean almost the same thing. A good set has a light background between its members and against the built-ins (red).'}]},
     'return-focus': {
         'summary': 'Pointing the policy at the task works: with L_rec on (lam 100) the return reaches 431 ± 18 (4 runs, mean of the last 50k updates), against 340 at the start and 329 without focus, which is the range E3 needed 1M updates for (419-438), while L_FB and the orthonormality term stay active (eps 0.05, orth_l2 0.60 against 0.43). L_rec is necessary: without it the return falls to 250-300, and with lam 30 it is 290. The focus level (0.5-1.0), the noise (0-0.5) and whether F or only the actor sees the latent all give 395-434, within the noise; a larger Q-loss weight breaks the reward fit (213 at 1.0). The other tasks do not suffer, they improve; a control without L_rec and without focus is missing to say how much of that comes from the extra L_FB training alone.',
         'figures': [

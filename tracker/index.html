@@ -150,6 +150,15 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
 .tip .row span.nm { color: var(--muted); }
 .chartnote { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .fam .summary { font-size: 15px; max-width: 80ch; margin: 0 0 18px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 4px 4px 0; }
+.mx { overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 8px; max-width: 100%; }
+.mx table { border-collapse: separate; border-spacing: 1px; font-size: 11px; width: auto; }
+.mx td { width: 11px; min-width: 11px; height: 11px; padding: 0; border: 0; }
+.mx th { font-weight: 500; padding: 0 3px; white-space: nowrap; color: var(--ink); text-transform: none; letter-spacing: 0; font-size: 10px; border: 0; line-height: 1; }
+.mx th.col { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; height: 92px; vertical-align: bottom; padding: 2px 0; }
+.mx th.row { text-align: right; }
+.mx .g-built { color: var(--bad); font-weight: 600; } .mx .g-first { color: var(--accent); } .mx .g-pick { font-weight: 700; text-decoration: underline; }
+.mxkey { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.mxkey i { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 5px; border-radius: 2px; }
 .alltasks { margin: 0 0 22px; }
 .alltasks table { font-size: 13px; }
 .alltasks td.num, .alltasks th.num { text-align: right; white-space: nowrap; font-family: var(--font-mono); }
@@ -331,7 +340,7 @@ details.allruns .tablebox { margin-top: 8px; }
 <script>
 (function () {
   var ROUTES = ["overview", "experiments", "results", "updates", "next", "slides"];
-  var data = { evalTasks: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
+  var data = { evalTasks: null, taskCorr: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
   var loaded = { jobs: false, tracking: false, families: false, curves: false, updates: false, todos: false, slides: false };
   var db = null, canWrite = false, deckIdx = 0;
 
@@ -632,6 +641,43 @@ details.allruns .tablebox { margin-top: 8px; }
     var best = ok.reduce(function (m, c) { return dir > 0 ? Math.max(m, c.val) : Math.min(m, c.val); }, ok[0].val);
     ok.forEach(function (c) { if (c.val === best) c.td.style.fontWeight = "700"; });
   }
+  function buildMatrix() {     // |correlation| of the candidate rewards over dataset states, one cell per pair
+    var d = data.taskCorr; if (!d || !d.names) return null;
+    var n = d.names.length, wrap = el("div"), box = el("div", "mx"), t = el("table");
+    var hr = el("tr"); hr.appendChild(el("th")); 
+    function cls(i) { return d.group[i] === "built-in" ? "g-built" : (d.group[i] === "first study" ? "g-first" : ""); }
+    d.names.forEach(function (nm, j) { hr.appendChild(el("th", "col " + cls(j) + (d.chosen.indexOf(nm) >= 0 ? " g-pick" : ""), nm)); });
+    t.appendChild(hr);
+    d.names.forEach(function (nm, i) {
+      var tr = el("tr");
+      tr.appendChild(el("th", "row " + cls(i) + (d.chosen.indexOf(nm) >= 0 ? " g-pick" : ""), nm));
+      for (var j = 0; j < n; j++) {
+        var v = d.matrix[i][j], td = el("td");
+        td.style.background = "color-mix(in srgb, var(--accent) " + Math.round(Math.max(0.03, v) * 100) + "%, transparent)";
+        td.title = nm + " x " + d.names[j] + ": |corr| " + v.toFixed(2);
+        tr.appendChild(td);
+      }
+      t.appendChild(tr);
+    });
+    box.appendChild(t); wrap.appendChild(box);
+    var key = el("div", "mxkey");
+    [["g-built", "built-in tasks"], ["g-first", "first study"], ["", "new rewards"], ["g-pick", "suggested set (greedy)"]].forEach(function (k) { var s1 = el("span", k[0]); s1.textContent = k[1]; key.appendChild(s1); });
+    var sc = el("span"); sc.innerHTML = '<i style="background:color-mix(in srgb, var(--accent) 4%, transparent);border:1px solid var(--line)"></i>0 &nbsp;<i style="background:color-mix(in srgb, var(--accent) 50%, transparent)"></i>0.5 &nbsp;<i style="background:var(--accent)"></i>1 (|corr|)'; key.appendChild(sc);
+    wrap.appendChild(key);
+    // the candidates, one row each
+    var det = el("details", "allruns"); det.appendChild(el("summary", null, "The " + n + " rewards: description, how often satisfied, closest neighbours"));
+    var tb = el("div", "tablebox"), tt = el("table"), h2 = el("tr");
+    ["Reward", "Description", "Satisfied", "Max |corr| with the built-ins", "Closest reward"].forEach(function (h) { h2.appendChild(el("th", null, h)); });
+    var th2 = el("thead"); th2.appendChild(h2); tt.appendChild(th2);
+    var b2 = el("tbody");
+    d.names.map(function (nm, i) { return i; }).sort(function (a, b) { return d.max_builtin[a] - d.max_builtin[b]; }).forEach(function (i) {
+      var tr = el("tr"); tr.appendChild(el("td", cls(i), d.names[i])); tr.appendChild(el("td", null, d.desc[i]));
+      tr.appendChild(el("td", "pm", d.support[i].toFixed(0) + " %")); tr.appendChild(el("td", "pm", d.group[i] === "built-in" ? "" : d.max_builtin[i].toFixed(2)));
+      tr.appendChild(el("td", "pm", d.nearest[i] + " (" + d.nearest_corr[i].toFixed(2) + ")")); b2.appendChild(tr);
+    });
+    tt.appendChild(b2); tb.appendChild(tt); det.appendChild(tb); wrap.appendChild(det);
+    return wrap;
+  }
   function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)
     var d = data.evalTasks; if (!d || !d.rows || !d.rows.length) return null;
     var tasks = d.tasks, base = null;
@@ -665,6 +711,13 @@ details.allruns .tablebox { margin-top: 8px; }
   function renderFigures(famJobs, info) {     // the curated figures of a family: a title, one sentence on why they are worth a look, the chart
     var figs = (info && info.figures) || [], wrap = el("div", "figs"), any = false;
     figs.forEach(function (f) {
+      if (f.type === "matrix") {
+        var mx = buildMatrix();
+        if (!mx) return;
+        var mb = el("div", "fig"); mb.style.gridColumn = "1 / -1";
+        mb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) mb.appendChild(el("p", "fig-why", f.why)); mb.appendChild(mx);
+        wrap.appendChild(mb); any = true; return;
+      }
       if (f.type === "alltasks") {
         var tbl = buildAllTasks();
         if (!tbl) return;
@@ -692,12 +745,14 @@ details.allruns .tablebox { margin-top: 8px; }
       var t = data.tracking[tkey(j.jobId)] || {};
       return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0, panel: t.panel || "", series: t.series || t.variant || "", ref: !!t.ref });
     }).filter(function (j) { return j.tracked && j.status === "finished" && j.results && j.family; });
-    if (!jobs.length) {
+    var standalone = Object.keys(data.families).filter(function (k) { return data.families[k].standalone; });
+    if (!jobs.length && !standalone.length) {
       out.appendChild(empty(loaded.jobs ? "No finished results yet" : "Loading", loaded.jobs ? "Finished tracked runs with an evaluation log appear here, grouped by family." : ""));
       return;
     }
     var fams = {};
     jobs.forEach(function (j) { (fams[j.family] = fams[j.family] || []).push(j); });
+    standalone.forEach(function (k) { if (!fams[k]) fams[k] = []; });
     Object.keys(fams).sort(function (a, b) { var oa = (data.families[a] || {}).order, ob = (data.families[b] || {}).order; return (oa != null ? oa : 99) - (ob != null ? ob : 99); }).forEach(function (fk) {
       var info = data.families[fk] || {}, panel = el("div", "panel fam");
       panel.appendChild(el("h3", null, info.title || fk));
@@ -756,7 +811,7 @@ details.allruns .tablebox { margin-top: 8px; }
       if (info.summary) panel.appendChild(el("p", "summary", info.summary));
       var figs = renderFigures(fams[fk], info);
       if (figs) panel.appendChild(figs);
-      var det = el("details", "allruns"); det.appendChild(el("summary", null, "All runs and numbers (" + fams[fk].length + " runs)")); det.appendChild(box); panel.appendChild(det);
+      if (fams[fk].length) { var det = el("details", "allruns"); det.appendChild(el("summary", null, "All runs and numbers (" + fams[fk].length + " runs)")); det.appendChild(box); panel.appendChild(det); }
       out.appendChild(panel);
     });
   }
@@ -852,6 +907,7 @@ details.allruns .tablebox { margin-top: 8px; }
         snap.docs.forEach(function (d) {
           if (d.id === "curves" || /^curves_\d+$/.test(d.id)) Object.assign(all, (d.data() || {}).curves || {});
           if (d.id === "eval_all_tasks") data.evalTasks = d.data() || null;
+          if (d.id === "task_corr") data.taskCorr = d.data() || null;
         });
         data.curves = all;
         loaded.curves = true; renderAll();

@@ -13,6 +13,7 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
                          fb_params and actor_params, e.g. the pretrained one), evaluates ALL the benchmark tasks of the env zero-shot (latent from fresh labels,
                          num_evals episodes each) and the stored latents of the stream tasks (tracked), writes eval_log.csv (tag eval_only) and exits.
                          The log folder is logs/<time>_FBeval-<env>-<tasks>; info.txt holds the source checkpoint. tasks= should be the stream the checkpoint was trained on.
+    eval_z=fresh      random: (eval-only control) the latent of every episode is a random vector on the sphere instead of the one inferred from fresh labels
     eval_labels=a,b   the fresh evaluation covers only these benchmark tasks (eval-only mode: the new walker tasks without re-evaluating the built-ins)
     eval_stream_only=0  1: the fresh zero-shot evaluation (rollouts and reward-reconstruction stats) covers only the tasks of the stream, not
                          all the benchmark tasks of the env (the other columns are left empty): 5x fewer environments per evaluation.
@@ -256,6 +257,8 @@ if __name__ == '__main__':
     EVAL_FRESH      = bool(int(kwargs['eval_fresh'])) if 'eval_fresh' in kwargs else True
     EVAL_ROLLOUTS   = bool(int(kwargs['eval_rollouts'])) if 'eval_rollouts' in kwargs else True
     EVAL_CKPT       = str(kwargs['eval_ckpt']) if 'eval_ckpt' in kwargs else None
+    EVAL_Z          = str(kwargs['eval_z']) if 'eval_z' in kwargs else 'fresh'
+    assert EVAL_Z in ('fresh', 'random'), "eval_z= must be fresh or random"
     EVAL_STREAM_ONLY = bool(int(kwargs['eval_stream_only'])) if 'eval_stream_only' in kwargs and not EVAL_CKPT else False
     REC_PREFIT      = bool(int(kwargs['rec_prefit'])) if 'rec_prefit' in kwargs else False
 
@@ -1574,7 +1577,10 @@ if __name__ == '__main__':
             for _ in range(NUM_EVALS):
                 fit_obs, _, _, fit_aux = replay_buffer.sample(next_eval_key(), EVAL_N)
                 z_raw, m2_fit = encode_reward(backward_params, fit_obs, reward_fn(fit_aux, param))
-                zs.append(math.sqrt(Z_DIM) * normalize(z_raw))
+                if EVAL_Z == 'random':      # control: the policy gets a random latent, so a return that survives does not come from the task latent
+                    zs.append(math.sqrt(Z_DIM) * normalize(jax.random.normal(next_eval_key(), (Z_DIM,))))
+                else:
+                    zs.append(math.sqrt(Z_DIM) * normalize(z_raw))
             hold_obs, _, _, hold_aux = replay_buffer.sample(next_eval_key(), EVAL_N)
             exp_obs = replay_buffer.sample(next_eval_key(), EVAL_N)[0]
             r_hold  = reward_fn(hold_aux, param) / jnp.sqrt(m2_fit + 1e-12)

@@ -34,10 +34,11 @@ for d in sorted(glob.glob('hpc/logs/*FBeval-*')):
         continue
     m = re.search(r'source=models/([^/\s]+)/', info)
     src = m.group(1) if m else 'PRETRAINED'
+    rnd = "'eval_z': 'random'" in info
     r = ev[-1]
     vals = {c[:-len('_fresh_mean')]: float(r[c]) for c in r if c.endswith('_fresh_mean') and r[c] not in (None, '')}
     if vals:
-        rows.setdefault(variant(src), []).append((src, vals))
+        rows.setdefault(variant(src) + (' [random latent]' if rnd else ''), []).append((src, vals))
 tasks = [t for t in ALL if any(t in v for rs in rows.values() for _, v in rs)]
 if not rows:
     sys.exit('no eval-only run found in hpc/logs (run tools/sync_from_hpc.sh)')

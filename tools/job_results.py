@@ -84,6 +84,9 @@ def _one(folder, task):
     step = int(float(last.get('step') or 0))
     out = {'task': task, 'final': round(final, 1), 'std': round(_num(last.get(std_c)) or 0.0, 1),
            'step': step, 'best': round(best, 1), 'start': None if start is None else round(start, 1)}
+    first = next((r for r in rows if _num(r.get(task + '_fresh_eps')) is not None), None)
+    if first is not None:
+        out['start_eps'] = round(_num(first[task + '_fresh_eps']), 4)
     for key, col in (('fresh_eps', task + '_fresh_eps'), ('fit_eps', task + '_fit_eps')):     # reward reconstruction at the last evaluation
         v = _num(last.get(col))
         if v is not None:
@@ -112,7 +115,7 @@ def _read(path):
 def curve(job, max_points=150):
     """Learning curves of a finished job. {'steps','mean','std'}: return (absent without rollouts);
     'eps': {'steps','v'} held-out reward reconstruction error (fresh readout); 'eps_fit' with the fixed readout of the stage;
-    'orth': {'steps','v'} orthonormality error of B from training_log.csv. None if the job has none of them."""
+    'orth', 'fb': {'steps','v'} orthonormality error of B and FB loss from training_log.csv (absent if not computed). None if the job has none of them."""
     if job.get('status') != 'finished' or not job.get('runFolders'):
         return None
     task = _task(job.get('command'))
@@ -142,14 +145,16 @@ def curve(job, max_points=150):
         if pts:
             steps = _thin(sorted(pts), max_points)
             out[key] = {'steps': steps, 'v': [round(pts[s], 5) for s in steps]}
-    pts = {}
-    for r in _read(os.path.join(LOGS, folder, 'training_log.csv')):
-        v = _num(r.get('orth_l2'))
-        if v:
-            pts[int(float(r.get('step') or 0))] = v
-    if pts:
-        steps = _thin(sorted(pts), max_points)
-        out['orth'] = {'steps': steps, 'v': [round(pts[s], 4) for s in steps]}
+    train = _read(os.path.join(LOGS, folder, 'training_log.csv'))
+    for key, col, nd in (('orth', 'orth_l2', 4), ('fb', 'fb_loss', 4)):       # 0 = not computed in this run
+        pts = {}
+        for r in train:
+            v = _num(r.get(col))
+            if v:
+                pts[int(float(r.get('step') or 0))] = v
+        if pts:
+            steps = _thin(sorted(pts), max_points)
+            out[key] = {'steps': steps, 'v': [round(pts[s], nd) for s in steps]}
     return out or None
 
 

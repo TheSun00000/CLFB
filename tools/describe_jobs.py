@@ -97,6 +97,8 @@ def free_class(cmd):
         if ref or not parts:
             memb = [(pn, 'E3 phase 1' if ref else 'E3-like') for pn in HOME]
             memb += [('number of labels', '10k labels' + tag), ('task', 'run' + tag)]
+            if ref:
+                memb += [(pn, 'E3 phase 1') for pn in FB_PANELS]
         else:
             memb = [(pn, key) for pn in FREE_PANELS.get(key, [])]
             if key == 'resolved readout':
@@ -118,8 +120,65 @@ def free_class(cmd):
     return free_variant(cmd), order, '|'.join(m[0] for m in memb), '|'.join(m[1] for m in memb), ref
 
 
+def is_fb(cmd):
+    """L_FB-on round (array of scripts/a100_dev_lrec_fb.sh): 500k updates, L_FB and ortho active, rollouts on."""
+    return 'fb_continual_temp.py' in cmd and flag(cmd, 'steps_per_stage') == '500000' and flag(cmd, 'fb_objective') != '0'
+
+
+FB_PANELS = ['lam sweep, low', 'lam sweep, high', 'ortho_coef at lam 100', 'ortho_coef at lam 10', 'B-only prefit', 'readout and B lr (lam 100)', 'labels and task (lam 100)']
+
+
+def fb_parts(cmd):
+    """(lam, set of modifiers) of an L_FB-on run, relative to 'E3-like L_rec, ortho 1, 10k labels, run'."""
+    lam, mods = flag(cmd, 'lam', '1'), []
+    if flag(cmd, 'rec_prefit') == '1': mods.append('prefit')
+    if flag(cmd, 'ortho_coef') not in (None, '1'): mods.append('ortho ' + flag(cmd, 'ortho_coef'))
+    if flag(cmd, 'rec_fixed_w') != '1' and lam != '0': mods.append('resolved readout')
+    if flag(cmd, 'lr_coef') == '1' and lam != '0': mods.append('lr x1 cosine')
+    if flag(cmd, 'b_cosine') != '1' and flag(cmd, 'rec_fixed_w') == '1': mods.append('lr x3 constant')
+    if flag(cmd, 'n_labeled', '10000') != '10000': mods.append('%sk labels' % (int(flag(cmd, 'n_labeled')) // 1000))
+    if flag(cmd, 'tasks') != 'run': mods.append(flag(cmd, 'tasks'))
+    return lam, mods
+
+
+def fb_variant(cmd):
+    lam, mods = fb_parts(cmd)
+    return 'L_FB on: ' + ('lam 0 (control, no L_rec)' if lam == '0' else ', '.join(['lam %s' % lam] + mods))
+
+
+def fb_class(cmd):
+    """(variant, order, panels, series, False). Panels hold at most 5 lines; the default run (lam N, E3-like, ortho 1) is in several."""
+    lam, mods = fb_parts(cmd)
+    L = int(float(lam))
+    m = []                                               # (panel, series)
+    if not mods:
+        if L in (0, 10, 30, 100): m.append(('lam sweep, low', 'lam %d' % L))
+        if L in (0, 100, 300, 1000): m.append(('lam sweep, high', 'lam %d' % L))
+        if L == 100:
+            m += [('ortho_coef at lam 100', 'ortho 1'), ('B-only prefit', 'lam 100'), ('readout and B lr (lam 100)', 'fixed readout, lr x3 cosine'),
+                  ('labels and task (lam 100)', 'run, 10k labels')]
+        if L == 10:
+            m += [('ortho_coef at lam 10', 'ortho 1'), ('B-only prefit', 'lam 10')]
+    elif mods == ['prefit']:
+        m.append(('B-only prefit', 'lam %d + prefit' % L))
+    elif len(mods) == 1 and mods[0].startswith('ortho'):
+        m.append(('ortho_coef at lam %d' % L, mods[0]))
+    elif mods == ['resolved readout']:
+        m.append(('readout and B lr (lam 100)', 'resolved readout, lam %d' % L))
+    elif mods in (['lr x1 cosine'], ['lr x3 constant']):
+        m.append(('readout and B lr (lam 100)', mods[0]))
+    elif len(mods) == 1:
+        m.append(('labels and task (lam 100)', mods[0]))
+    if not m:
+        m = [('', fb_variant(cmd))]
+    order = 1 + L // 10 + (0 if not mods else 40 + len(mods[0]))
+    return fb_variant(cmd), order, '|'.join(x[0] for x in m), '|'.join(x[1] for x in m), False
+
+
 def lrec_class(cmd):
     """(variant, order, panel, series, is_reference) for fb_continual_temp.py runs."""
+    if is_fb(cmd):
+        return fb_class(cmd)
     if is_free(cmd):
         return free_class(cmd)
     v = lrec_round1(cmd)
@@ -137,11 +196,15 @@ def describe(j):
     arr = j['arrayJob'] or j['jobId']
     tail = ''
     if 'fb_continual_temp.py' in cmd:
-        v = free_variant(cmd) if is_free(cmd) else lrec_round1(cmd)
+        v = fb_variant(cmd) if is_fb(cmd) else (free_variant(cmd) if is_free(cmd) else lrec_round1(cmd))
         title = 'L_rec vs E3 phase 1: %s' % v
         desc = ('Which differences between L_rec (continual) and fit_backward_to_reward (E3 phase 1) make B regress onto the reward as well? '
                 'Run of fb_continual_temp.py on walker %s, %s labeled states, variant: %s. ' % (flag(cmd, 'tasks'), flag(cmd, 'n_labeled'), v))
-        if is_free(cmd):
+        if is_fb(cmd):
+            desc += ('L_FB and the ortho term are active, %s updates, F and the actor on uniform z, returns evaluated every 25k updates. Question: how low can the held-out '
+                     'eps go while L_FB and ortho stay active, and at what price in orth_l2, fb_loss and return? E3-like L_rec = fixed readout, batch 4096, B lr x3 with cosine decay.'
+                     % flag(cmd, 'steps_per_stage'))
+        elif is_free(cmd):
             desc += ('B is driven by L_rec alone (fb_objective=0, no L_FB), %s updates, no rollouts. E3-like = fixed readout, batch 4096, B lr x3 with cosine '
                      'decay, ortho_coef=0; the reference is fit_backward_to_reward itself (30k B-only steps). Metric: held-out eps (eval_log.csv, %s_fresh_eps).'
                      % (flag(cmd, 'steps_per_stage'), flag(cmd, 'tasks')))
@@ -214,7 +277,7 @@ FAMILIES = {
     'finetune-ablation': ('E3 ablation: warm start, lr, tau', 5,
                           'Walker run, 10k labels, 1M steps. E3 (finetune=reward_critic) with F and the actor re-initialised and/or the TD3 learning rate (3e-4) and target tau (0.005), to explain the gap to the TD3 reference R2. Two runs per variant.'),
     'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 6,
-                    'Walker, one stage, mu_b=mu_q=0, no rollouts. Variants of the L_rec path of fb_continual_temp.py compared with E3 phase 1 (dashed lines) on how well B reconstructs the reward (held-out eps, log scale). Round 1 (60k updates, L_FB on or off, with returns) and the free round (L_rec alone, 30k updates, 60 runs).'),
+                    'Walker, one stage, mu_b=mu_q=0. Variants of the L_rec path of fb_continual_temp.py compared with E3 phase 1 (dashed lines) on how well B reconstructs the reward (held-out eps, log scale). Round 1 (60k updates, L_FB on or off, with returns), the free round (L_rec alone, 30k updates, 60 runs), and round 3 (L_FB and ortho on, 500k updates, with returns, orth_l2 and FB loss).'),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
 }
@@ -285,5 +348,6 @@ for raw, j in jobs.items():
     print(raw, j['status'], '|', fam, '|', var)
 print(n)
 fam_docs = {k: {'title': v[0], 'order': v[1], 'description': v[2]} for k, v in FAMILIES.items()}
-fam_docs['lrec-vs-fit'].update({'plots': ['eps', 'orth'], 'table': 'eps', 'plotPanels': {'orth': ['ortho term, no L_FB']}})
+fam_docs['lrec-vs-fit'].update({'plots': ['eps', 'return', 'orth', 'fb'], 'table': 'eps',
+                                'plotPanels': {'orth': ['ortho term, no L_FB'] + FB_PANELS, 'fb': FB_PANELS}})
 json.dump(fam_docs, open('hpc/status/families.json', 'w'), indent=1)

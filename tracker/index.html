@@ -581,6 +581,8 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     "return": { title: "Return", get: function (c) { return c.steps ? c : null; }, fmt: null, log: false },
     eps: { title: "Reward reconstruction error on held-out states (eps, log scale)", get: function (c) { return c.eps ? { steps: c.eps.steps, mean: c.eps.v } : null; },
            fmt: function (v) { return v.toFixed(3); }, log: true },
+    fb: { title: "FB loss during training (fb_loss; the control without L_rec is the reference level)", get: function (c) { return c.fb ? { steps: c.fb.steps, mean: c.fb.v } : null; },
+          fmt: function (v) { return v.toFixed(2); }, log: false },
     orth: { title: "Orthonormality error of B during training (orth_l2)", get: function (c) { return c.orth ? { steps: c.orth.steps, mean: c.orth.v } : null; },
             fmt: function (v) { return v.toFixed(2); }, log: false }
   };
@@ -650,7 +652,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
       fams[fk].forEach(function (j) { (groups[j.variant] = groups[j.variant] || { order: j.order, jobs: [] }).jobs.push(j); });
       var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
       var epsTable = info.table === "eps";
-      (epsTable ? ["Configuration", "Runs", "eps (fresh readout)", "eps (fixed readout)", "orth_l2", "Start eps", "Jobs"]
+      (epsTable ? ["Configuration", "Runs", "eps (fresh readout)", "eps (fixed readout)", "orth_l2", "Start eps", "Return", "Jobs"]
                 : ["Configuration", "Runs", "Final return", "Best during run", "Start", "Jobs"]).forEach(function (h) { hr.appendChild(el("th", null, h)); });
       var th = el("thead"); th.appendChild(hr); t.appendChild(th);
       var tb = el("tbody");
@@ -669,6 +671,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
           tr.appendChild(el("td", "pm", col("fit_eps", 4)));
           tr.appendChild(el("td", "pm", col("orth", 2)));
           tr.appendChild(el("td", "pm", col("start_eps", 4)));
+          tr.appendChild(el("td", "pm", col("final", 1)));
           tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
           tb.appendChild(tr);
           return;

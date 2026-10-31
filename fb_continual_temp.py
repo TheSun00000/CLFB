@@ -13,6 +13,7 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
                          fb_params and actor_params, e.g. the pretrained one), evaluates ALL the benchmark tasks of the env zero-shot (latent from fresh labels,
                          num_evals episodes each) and the stored latents of the stream tasks (tracked), writes eval_log.csv (tag eval_only) and exits.
                          The log folder is logs/<time>_FBeval-<env>-<tasks>; info.txt holds the source checkpoint. tasks= should be the stream the checkpoint was trained on.
+    eval_labels=a,b   the fresh evaluation covers only these benchmark tasks (eval-only mode: the new walker tasks without re-evaluating the built-ins)
     eval_stream_only=0  1: the fresh zero-shot evaluation (rollouts and reward-reconstruction stats) covers only the tasks of the stream, not
                          all the benchmark tasks of the env (the other columns are left empty): 5x fewer environments per evaluation.
     ztask_bs=0        >0: the task latent z_k of z_task_frac / actor_z_task_frac is re-encoded at every step on a random minibatch of this many
@@ -695,6 +696,10 @@ if __name__ == '__main__':
     # Number of benchmarks rolled out in parallel during eval (each one needs NUM_EVALS env instances)
     EVAL_CHUNK = int(kwargs['eval_chunk']) if 'eval_chunk' in kwargs else N_BENCH
     EVAL_BENCH = list(TASK_IDX) if EVAL_STREAM_ONLY else list(range(N_BENCH))      # benchmark tasks of the fresh evaluation
+    if 'eval_labels' in kwargs:       # eval_labels=a,b,c: the fresh evaluation covers only these benchmark tasks (the other columns stay empty)
+        _el = [t for t in str(kwargs['eval_labels']).strip('[]').split(',') if t]
+        assert all(t in LABELS for t in _el), f"eval_labels= must be among {LABELS}"
+        EVAL_BENCH = [LABELS.index(t) for t in _el]
 
     EVAL_FIELDS = (["stage", "step", "tag", "mean_fresh_all", "mean_fresh_tasks", "mean_tracked_tasks"]
                    + [f"{label}_fresh_{s}" for label in LABELS for s in ("mean", "std", "rew_corr", "eps")]

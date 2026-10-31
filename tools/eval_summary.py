@@ -24,8 +24,8 @@ def variant(folder):
     return classify(j)[1]
 
 
-rows = {}
-tasks = None
+ALL = ['stand', 'walk', 'vel8', 'run', 'flip', 'spin_back', 'kick_r', 'lean_a', 'jump', 'knees_bent', 'split']
+rows = {}                       # configuration -> list of (source run folder, {task: return})
 for d in sorted(glob.glob('hpc/logs/*FBeval-*')):
     try:
         info = open(d + '/info.txt').read()
@@ -33,26 +33,33 @@ for d in sorted(glob.glob('hpc/logs/*FBeval-*')):
     except OSError:
         continue
     m = re.search(r'source=models/([^/\s]+)/', info)
-    name = variant(m.group(1)) if m else 'PRETRAINED'
+    src = m.group(1) if m else 'PRETRAINED'
     r = ev[-1]
-    tasks = tasks or sorted({c[:-len('_fresh_mean')] for c in r if c.endswith('_fresh_mean')}, key=lambda t: ['stand', 'walk', 'vel8', 'run', 'flip'].index(t) if t in ['stand', 'walk', 'vel8', 'run', 'flip'] else 9)
-    rows.setdefault(name, []).append({t: float(r['%s_fresh_mean' % t]) for t in tasks if r.get('%s_fresh_mean' % t) not in (None, '')})
+    vals = {c[:-len('_fresh_mean')]: float(r[c]) for c in r if c.endswith('_fresh_mean') and r[c] not in (None, '')}
+    if vals:
+        rows.setdefault(variant(src), []).append((src, vals))
+tasks = [t for t in ALL if any(t in v for rs in rows.values() for _, v in rs)]
 if not rows:
     sys.exit('no eval-only run found in hpc/logs (run tools/sync_from_hpc.sh)')
+def cell(rs, t):
+    v = [vals[t] for _, vals in rs if t in vals]
+    return st.mean(v) if v else None
+
+
 with open('hpc/eval_all_tasks.csv', 'w') as f:
     w = csv.writer(f); w.writerow(['configuration', 'runs'] + tasks)
     for name, rs in rows.items():
-        w.writerow([name, len(rs)] + ['%.1f' % st.mean(r[t] for r in rs) for t in tasks])
+        w.writerow([name, len({s_ for s_, _ in rs})] + ['' if cell(rs, t) is None else '%.1f' % cell(rs, t) for t in tasks])
 order = {}
 for j in snap.values():
     for f in (j.get('runFolders') or []):
         if not j.get('children') and f in by_folder:
             order[variant(f)] = classify(j)[2]
-doc = {'tasks': tasks, 'rows': [{'name': name, 'runs': len(rs), 'order': (-1 if name == 'pretrained model' else order.get(name, 99)),
-                                 'values': {t: round(st.mean(r[t] for r in rs), 1) for t in tasks}} for name, rs in rows.items()]}
+doc = {'tasks': tasks, 'rows': [{'name': name, 'runs': len({s_ for s_, _ in rs}), 'order': (-1 if name == 'pretrained model' else order.get(name, 99)),
+                                 'values': {t: round(cell(rs, t), 1) for t in tasks if cell(rs, t) is not None}} for name, rs in rows.items()]}
 doc['rows'].sort(key=lambda r: (r['order'], r['name']))
 with open('hpc/status/eval_all_tasks.json', 'w') as f:
     json.dump(doc, f)
-print('%-62s %4s ' % ('configuration', 'runs') + ' '.join('%7s' % t for t in tasks))
+print('%-62s %4s ' % ('configuration', 'runs') + ' '.join('%7s' % t[:7] for t in tasks))
 for name, rs in sorted(rows.items(), key=lambda kv: (kv[0] != 'pretrained model', kv[0])):
-    print('%-62s %4d ' % (name, len(rs)) + ' '.join('%7.0f' % st.mean(r[t] for r in rs) for t in tasks))
+    print('%-62s %4d ' % (name, len({s_ for s_, _ in rs})) + ' '.join('%7s' % ('' if cell(rs, t) is None else '%.0f' % cell(rs, t)) for t in tasks))

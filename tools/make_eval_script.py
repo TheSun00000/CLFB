@@ -22,6 +22,7 @@ def main():
     ap.add_argument('--per-job', type=int, default=8)
     ap.add_argument('--out', default='scripts/a100_dev_eval_all_tasks.sh')
     ap.add_argument('--time', default='0:45:00')
+    ap.add_argument('--eval-labels', default=None, help='evaluate only these benchmark tasks (eval_labels=...)')
     a = ap.parse_args()
     jobs = json.load(open(os.path.join(ROOT, 'hpc', 'status', 'snapshot.json')))['jobs']
     runs, skipped = [], []
@@ -37,11 +38,12 @@ def main():
         sys.exit('no finished run found in arrays %s (skipped: %s)' % (a.arrays, skipped))
     ck = flag(runs[0][1], 'checkpoint')
     env = flag(runs[0][1], 'env_name')
-    cmds = [('pretrained model (baseline)', 'python fb_continual_temp.py env_name=%s checkpoint=$CKPT tasks=%s eval_ckpt=$CKPT' % (env, ','.join(runs[0][3])))]
+    extra = (' eval_labels=%s' % a.eval_labels) if a.eval_labels else ''
+    cmds = [('pretrained model (baseline)', 'python fb_continual_temp.py env_name=%s checkpoint=$CKPT tasks=%s eval_ckpt=$CKPT%s' % (env, ','.join(runs[0][3]), extra))]
     for k, cmd, folder, tasks in runs:
         stage = len(tasks)
         path = 'models/%s/fb_stage_%d_%s.pickle' % (folder, stage, tasks[-1])
-        cmds.append((k, 'python fb_continual_temp.py env_name=%s checkpoint=$CKPT tasks=%s eval_ckpt=%s' % (flag(cmd, 'env_name'), ','.join(tasks), path)))
+        cmds.append((k, 'python fb_continual_temp.py env_name=%s checkpoint=$CKPT tasks=%s eval_ckpt=%s%s' % (flag(cmd, 'env_name'), ','.join(tasks), path, extra)))
     head = open(os.path.join(ROOT, 'scripts', 'a100_dev_return.sh')).read().split('\n# Round 4')[0]
     head = re.sub(r'--time=\S+', '--time=' + a.time, head)
     n_jobs = (len(cmds) + a.per_job - 1) // a.per_job

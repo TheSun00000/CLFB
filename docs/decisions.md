@@ -10,6 +10,12 @@ Newest first. One entry per decision: what, why, what else was considered.
 - Update 2 (random-latent control): of the six, only split is a genuine latent-driven zero-shot ability of the pretrained model (977 vs 386 with a random latent) that is lost after fine-tuning on run (594 vs 602). The others gain little from the latent. A broader set was designed afterwards (tools/reward_library.py, 54 rewards, matrix in the tracker).
 - Update: the zero-shot returns of the round-4 checkpoints on these tasks (eval-only job 1793300) are dominated by the default posture of the policy (no run was trained on the tasks), so they neither confirm nor refute the choice. lean_a is not usable (return 29-978 at the same eps); a task needs to be learned first for its return to say anything.
 
+## 2026-10-31: task list = stand, run, flip + supine, jump_any, kick_l, split, flamingo_r
+- Decision: the study uses three built-in walker tasks (stand, run, flip) and five new tasks defined on the observation: supine (torso lying horizontal), jump_any (upward velocity >= 3), kick_l (left hip velocity >= 20 rad/s), split (thighs >= 60 deg apart), flamingo_r (right foot >= 0.35 above the ground, left foot on it). `bench=final` in `fb_continual_temp.py` selects exactly this list.
+- Reason: priority on low correlation among the chosen tasks (tolerated 0.3), then distinct skills for the story. Largest |corr| among the new tasks 0.08, between a new task and stand, run or flip 0.19 (supine). Walk and vel8 dropped (0.92 and 1.0 with run).
+- Alternatives considered: slide_fast (run's speed without the upright term, 0.25 with run), spin_back (flip reversed, 0.45 with kick_l), kicked_up (0.2 with all three kept tasks, 0.79 with knees_bent), the greedy set of the matrix (r_foot_ahead, toes_down, hips_antiphase, ...: gait-like), lean_a, hop_pose (0.73 with jump_any).
+- Evidence: tools/reward_library.py and tools/reward_corr.py (|corr| on 100k dataset states, matrix on the tracker). The three kept tasks are correlated with each other (stand-run 0.88, run-flip 0.77, stand-flip 0.77). Not yet checked for supine, jump_any, kick_l, flamingo_r: B-encodability, reachability by a policy, the random-latent control; split is validated.
+
 ## Template
 ### YYYY-MM-DD: short title
 - Decision:

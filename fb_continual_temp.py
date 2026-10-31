@@ -13,6 +13,7 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
                          fb_params and actor_params, e.g. the pretrained one), evaluates ALL the benchmark tasks of the env zero-shot (latent from fresh labels,
                          num_evals episodes each) and the stored latents of the stream tasks (tracked), writes eval_log.csv (tag eval_only) and exits.
                          The log folder is logs/<time>_FBeval-<env>-<tasks>; info.txt holds the source checkpoint. tasks= should be the stream the checkpoint was trained on.
+    bench=all         final: (walker) the benchmark list is the task list of the study: stand run flip supine jump_any kick_l split flamingo_r
     eval_z=fresh      random: (eval-only control) the latent of every episode is a random vector on the sphere instead of the one inferred from fresh labels
     eval_labels=a,b   the fresh evaluation covers only these benchmark tasks (eval-only mode: the new walker tasks without re-evaluating the built-ins)
     eval_stream_only=0  1: the fresh zero-shot evaluation (rollouts and reward-reconstruction stats) covers only the tasks of the stream, not
@@ -40,7 +41,7 @@ Flags:
     env_name=      cheetah | walker | quadruped | antmaze | pointmaze           (required)
     checkpoint=    path of the pretrained FB pickle                              (required)
     tasks=         ordered list of eval-task labels of the env (>= 1, unique): the continual stream.
-                   labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip + (fb_continual_temp.py only) spin_back kick_r lean_a jump knees_bent split
+                   labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip + (fb_continual_temp.py only) spin_back kick_r lean_a jump knees_bent split kick_l jump_any supine flamingo_r
                            quadruped: stand walk run jump | pointmaze: goal_0_20 goal_20_20 goal_20_0 goal_4_4 goal_12_12
                            antmaze: goal_bottom ... (see `benchmarks` below)
     seed=<int>               default: random (logged in info.txt)
@@ -391,6 +392,17 @@ if __name__ == '__main__':
                     * tolerance(jnp.abs(_wrap(_body_angle(o, 5) - _body_angle(o, 4))), 60 * d, INF, 40 * d))
         if param == 'split':          # legs apart: |angle(r.thigh) - angle(l.thigh)| >= 60 deg
             return tolerance(jnp.abs(_wrap(_body_angle(o, 1) - _body_angle(o, 4))), 60 * d, INF, 40 * d)
+        if param == 'kick_l':         # left hip velocity >= 20 rad/s
+            return tolerance(o[..., 21], 20.0, INF, 20.0)
+        if param == 'jump_any':       # upward velocity >= 3, any posture
+            return tolerance(o[..., 15], 3.0, INF, 3.0)
+        if param == 'supine':         # torso lying horizontal on one side (sin of the torso angle <= -0.8)
+            return tolerance(-o[..., 1], 0.8, INF, 0.4)
+        if param == 'flamingo_r':     # right foot >= 0.35 above the ground, left foot on the ground (forward kinematics: hip 0.3, thigh 0.45, leg 0.5)
+            hip_y = o[..., 14] - 0.3 * o[..., 0]
+            ank_r = hip_y - 0.45 * o[..., 2] - 0.5 * o[..., 4]
+            ank_l = hip_y - 0.45 * o[..., 8] - 0.5 * o[..., 10]
+            return tolerance(ank_r, 0.35, INF, 0.25) * tolerance(ank_l, -INF, 0.12, 0.12)
         raise NotImplementedError(param)
 
     # Quadruped: aux = [torso_velocity(3), torso_upright, com_height]
@@ -536,6 +548,10 @@ if __name__ == '__main__':
                 (walker_new_reward, 'jump',       'jump'),
                 (walker_new_reward, 'knees_bent', 'knees_bent'),
                 (walker_new_reward, 'split',      'split'),
+                (walker_new_reward, 'kick_l',     'kick_l'),
+                (walker_new_reward, 'jump_any',   'jump_any'),
+                (walker_new_reward, 'supine',     'supine'),
+                (walker_new_reward, 'flamingo_r', 'flamingo_r'),
             ]
 
         elif ENV_NAME == 'quadruped':
@@ -684,6 +700,9 @@ if __name__ == '__main__':
         def env_aux(e, state):
             return state
 
+    if ENV_NAME == 'walker' and str(kwargs.get('bench', 'all')) == 'final':      # the task list of the study: 3 built-ins + 5 tasks defined on the observation
+        _final = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+        benchmarks = [b for lab in _final for b in benchmarks if b[1] == lab]
     N_BENCH   = len(benchmarks)
     NUM_EVALS = int(kwargs['num_evals']) if 'num_evals' in kwargs else 20
     print(NUM_TRAJECTORIES, TRAJECTORY_LEN, NUM_TRAJECTORIES * TRAJECTORY_LEN)

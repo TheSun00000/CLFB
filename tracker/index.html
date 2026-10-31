@@ -674,7 +674,7 @@ details.allruns .tablebox { margin-top: 8px; }
     });
     box.appendChild(t); wrap.appendChild(box);
     var key = el("div", "mxkey");
-    [["g-built", "built-in tasks"], ["g-first", "first study"], ["", "new rewards"], ["g-pick", "suggested set (greedy)"]].forEach(function (k) { var s1 = el("span", k[0]); s1.textContent = k[1]; key.appendChild(s1); });
+    [["g-built", "built-in tasks"], ["g-first", "first study"], ["", "new rewards"], ["g-pick", "selected task list"]].forEach(function (k) { var s1 = el("span", k[0]); s1.textContent = k[1]; key.appendChild(s1); });
     var sc = el("span"); sc.innerHTML = '<i style="background:color-mix(in srgb, var(--accent) 4%, transparent);border:1px solid var(--line)"></i>0 &nbsp;<i style="background:color-mix(in srgb, var(--accent) 50%, transparent)"></i>0.5 &nbsp;<i style="background:var(--accent)"></i>1 (|corr|)'; key.appendChild(sc);
     wrap.appendChild(key);
     // the candidates, one row each

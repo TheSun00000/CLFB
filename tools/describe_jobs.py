@@ -347,7 +347,7 @@ EXTRA = {
             {'plot': 'return', 'panel': 'task focus', 'title': 'Does training on the task latent raise the return?',
              'why': 'Zero-shot return on run, with the latent inferred from fresh labels (higher is better). Focus is the share of the training z replaced by the task latent; 0 is the unfocused run of the previous round. For scale: the pretrained policy is at 340 and E3 reaches 419-438 after 1M updates.'},
             {'type': 'alltasks', 'title': 'What happens to the other tasks?',
-             'why': 'Zero-shot return on every walker task at the end of training (latent inferred from fresh labels, 20 episodes), with the change from the pretrained model in colour. A policy pointed at run keeps the model general only if the other columns hold.'},
+             'why': 'Zero-shot return on every walker task at the end of training (latent inferred from fresh labels, 20 episodes), with the change from the pretrained model in colour. The five built-in tasks (left) do not suffer from the focus on run. The six columns on the right are new tasks that are not aligned with run: split and knees_bent, which the pretrained policy already does (977 and 460), fall in 10 and 8 of the 10 focused runs, so these two are what retention has to protect; the other four start low and have little to lose.'},
             {'plot': 'eps', 'panel': 'task focus', 'title': 'Does the task focus hurt the reward fit?',
              'why': 'Held-out error of the reward reconstruction (lower is better; the E3 reference is 0.032). With the task focus it stays at 0.03-0.06, only a little above the unfocused run (0.036).'},
             {'plot': 'orth', 'panel': 'task focus', 'title': 'Is B still orthonormal?',

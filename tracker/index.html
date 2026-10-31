@@ -626,6 +626,12 @@ details.allruns .tablebox { margin-top: 8px; }
     });
     return series.length ? drawChart("", series, { log: m.log, fmt: m.fmt, fmt0: m.fmt0, ylabel: m.ylabel }) : null;
   }
+  function markBest(cells, dir) {     // bold the best value of a column: dir +1 = higher is better, -1 = lower is better; cells = [{td, val}]
+    var ok = cells.filter(function (c) { return c.val != null && !isNaN(c.val); });
+    if (ok.length < 2) return;
+    var best = ok.reduce(function (m, c) { return dir > 0 ? Math.max(m, c.val) : Math.min(m, c.val); }, ok[0].val);
+    ok.forEach(function (c) { if (c.val === best) c.td.style.fontWeight = "700"; });
+  }
   function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)
     var d = data.evalTasks; if (!d || !d.rows || !d.rows.length) return null;
     var tasks = d.tasks, base = null;
@@ -633,12 +639,14 @@ details.allruns .tablebox { margin-top: 8px; }
     var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
     ["Configuration", "runs"].concat(tasks).forEach(function (h, i) { hr.appendChild(el("th", i > 0 ? "num" : null, h)); });
     var th = el("thead"); th.appendChild(hr); t.appendChild(th);
-    var tb = el("tbody");
+    var tb = el("tbody"), cols = {};
+    tasks.forEach(function (tk) { cols[tk] = []; });
     d.rows.forEach(function (r) {
       var tr = el("tr", r === base ? "base" : null);
       tr.appendChild(el("td", null, r.name)); tr.appendChild(el("td", "num", String(r.runs)));
       tasks.forEach(function (tk) {
         var v = r.values[tk], c = el("td", "num");
+        if (r !== base) cols[tk].push({ td: c, val: v });
         c.appendChild(document.createTextNode(v == null ? "" : String(Math.round(v))));
         if (base && r !== base && v != null && base.values[tk] != null) {
           var dl = v - base.values[tk], sp = el("span", Math.abs(dl) < 20 ? "flat" : (dl > 0 ? "up" : "down"), " " + (dl >= 0 ? "+" : "") + Math.round(dl));
@@ -648,8 +656,11 @@ details.allruns .tablebox { margin-top: 8px; }
       });
       tb.appendChild(tr);
     });
+    tasks.forEach(function (tk) { markBest(cols[tk], 1); });
     t.appendChild(tb); box.appendChild(t);
-    var wrap = el("div", "alltasks"); wrap.appendChild(box); return wrap;
+    var wrap = el("div", "alltasks"); wrap.appendChild(box);
+    wrap.appendChild(el("p", "chartnote", "Bold: the best configuration of the column (the pretrained row is the reference)."));
+    return wrap;
   }
   function renderFigures(famJobs, info) {     // the curated figures of a family: a title, one sentence on why they are worth a look, the chart
     var figs = (info && info.figures) || [], wrap = el("div", "figs"), any = false;
@@ -698,10 +709,14 @@ details.allruns .tablebox { margin-top: 8px; }
       (epsTable ? ["Configuration", "Runs", "eps (fresh readout)", "eps (fixed readout)", "orth_l2", "Start eps", "Return", "Jobs"]
                 : ["Configuration", "Runs", "Final return", "Best during run", "Start", "Jobs"]).forEach(function (h) { hr.appendChild(el("th", null, h)); });
       var th = el("thead"); th.appendChild(hr); t.appendChild(th);
-      var tb = el("tbody");
+      var tb = el("tbody"), marks = { fresh: [], fit: [], orth: [], ret: [], fin: [], bst: [] };
       Object.keys(groups).sort(function (a, b) { return groups[a].order - groups[b].order; }).forEach(function (vk) {
         var g = groups[vk].jobs, tr = el("tr");
         if (epsTable) {
+          function num(key) {
+            var a = g.map(function (j) { return j.results[key]; }).filter(function (v) { return v != null; });
+            return a.length ? stats(a).m : null;
+          }
           function col(key, dec) {
             var a = g.map(function (j) { return j.results[key]; }).filter(function (v) { return v != null; });
             if (!a.length) return "";
@@ -710,11 +725,12 @@ details.allruns .tablebox { margin-top: 8px; }
           }
           tr.appendChild(el("td", null, vk));
           tr.appendChild(el("td", "mono", g.length === 1 ? "1 run" : String(g.length)));
-          tr.appendChild(el("td", "pm", col("fresh_eps", 4)));
-          tr.appendChild(el("td", "pm", col("fit_eps", 4)));
-          tr.appendChild(el("td", "pm", col("orth", 2)));
+          var c1 = el("td", "pm", col("fresh_eps", 4)), c2 = el("td", "pm", col("fit_eps", 4)), c3 = el("td", "pm", col("orth", 2)), c5 = el("td", "pm", col("final", 1));
+          marks.fresh.push({ td: c1, val: num("fresh_eps") }); marks.fit.push({ td: c2, val: num("fit_eps") });
+          marks.orth.push({ td: c3, val: num("orth") }); marks.ret.push({ td: c5, val: num("final") });
+          tr.appendChild(c1); tr.appendChild(c2); tr.appendChild(c3);
           tr.appendChild(el("td", "pm", col("start_eps", 4)));
-          tr.appendChild(el("td", "pm", col("final", 1)));
+          tr.appendChild(c5);
           tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
           tb.appendChild(tr);
           return;
@@ -727,12 +743,16 @@ details.allruns .tablebox { margin-top: 8px; }
         var cf = el("td", "pm", pm(fin, g[0].results.std));
         if (fin.n === 1) cf.appendChild(el("span", "badge1", " (rollouts)"));
         tr.appendChild(cf);
-        tr.appendChild(el("td", "pm", pm(best, null)));
+        var cb = el("td", "pm", pm(best, null));
+        marks.fin.push({ td: cf, val: fin.m }); marks.bst.push({ td: cb, val: best.m });
+        tr.appendChild(cb);
         tr.appendChild(el("td", "pm", starts.length ? pm(stats(starts), null) : "none"));
         tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
         tb.appendChild(tr);
       });
+      markBest(marks.fresh, -1); markBest(marks.fit, -1); markBest(marks.orth, -1); markBest(marks.ret, 1); markBest(marks.fin, 1); markBest(marks.bst, 1);
       t.appendChild(tb); box.appendChild(t);
+      box.appendChild(el("p", "chartnote", "Bold: the best value of the column (highest return, lowest error). The start column is not ranked."));
       if (info.summary) panel.appendChild(el("p", "summary", info.summary));
       var figs = renderFigures(fams[fk], info);
       if (figs) panel.appendChild(figs);

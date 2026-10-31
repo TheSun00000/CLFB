@@ -25,65 +25,128 @@ def abl(cmd):
 def abl_text(cmd):
     return abl(cmd) + ' (the TD3 reference uses lr 3e-4, tau 0.005, a critic from scratch)'
 
-def lrec_variant(cmd):
-    """Variant of an fb_continual_temp.py run of the L_rec-vs-fit_backward_to_reward study."""
-    nl = 'n_labeled=%s' % flag(cmd, 'n_labeled', '10000')
-    kl = '%sk labels' % (int(flag(cmd, 'n_labeled', '10000')) // 1000)
+def lrec_round1(cmd):
+    """Round 1 (array 1782771, returns on, L_FB on or off): variants named by the flags that differ from the baseline."""
     if flag(cmd, 'finetune') == 'reward_critic':
-        return 'reference: E3 phase 1, %s' % kl
-    if flag(cmd, 'eval_rollouts') is None:
-        # round 1 (array 1782771): the variants are named by the flags that differ from the baseline
-        parts = []
-        if flag(cmd, 'rec_fixed_w') == '1': parts.append('fixed readout')
-        if flag(cmd, 'rec_bs'): parts.append('minibatch %s' % flag(cmd, 'rec_bs'))
-        if flag(cmd, 'lr_coef'): parts.append('B lr x%s' % flag(cmd, 'lr_coef'))
-        if flag(cmd, 'b_cosine') == '1': parts.append('cosine')
-        if flag(cmd, 'fb_objective') == '0': parts.append('B driven by L_rec only')
-        if flag(cmd, 'lam') != '10': parts.append('lam %s' % flag(cmd, 'lam'))
-        return 'round 1: ' + (' + '.join(parts) or 'baseline L_rec (lam 10)')
+        return 'reference: E3 phase 1, 10k labels'
     parts = []
-    if flag(cmd, 'rec_fixed_w') == '1' and flag(cmd, 'rec_bs') and flag(cmd, 'lr_coef') and flag(cmd, 'b_cosine') == '1':
-        parts.append('OPT')
-    elif flag(cmd, 'rec_fixed_w') == '1' or flag(cmd, 'rec_bs') or flag(cmd, 'lr_coef') or flag(cmd, 'b_cosine') == '1':
-        parts.append('some of OPT')
+    if flag(cmd, 'rec_fixed_w') == '1': parts.append('fixed readout')
+    if flag(cmd, 'rec_bs'): parts.append('minibatch %s' % flag(cmd, 'rec_bs'))
+    if flag(cmd, 'lr_coef'): parts.append('B lr x%s' % flag(cmd, 'lr_coef'))
+    if flag(cmd, 'b_cosine') == '1': parts.append('cosine')
     if flag(cmd, 'fb_objective') == '0': parts.append('B driven by L_rec only')
-    parts = ['lam %s' % flag(cmd, 'lam', '1')] + [x for x in parts if x != 'OPT']
-    if flag(cmd, 'ortho_coef'): parts.append('ortho %s' % flag(cmd, 'ortho_coef'))
-    if flag(cmd, 'rec_prefit') == '1': parts.append('B-only prefit')
-    if flag(cmd, 'n_labeled', '10000') != '10000': parts.append(kl)
-    return ' + '.join(parts)
+    if flag(cmd, 'lam') != '10': parts.append('lam %s' % flag(cmd, 'lam'))
+    return 'round 1: ' + (' + '.join(parts) or 'baseline L_rec (lam 10)')
+
+
+def is_free(cmd):
+    """Free round: B driven by L_rec alone (fb_objective=0), no rollouts."""
+    return 'fb_continual_temp.py' in cmd and flag(cmd, 'eval_rollouts') == '0'
+
+
+def free_parts(cmd):
+    """Differences of a free-round L_rec run from 'E3-like' (fixed readout, batch 4096, B lr x3 with cosine decay, ortho off)."""
+    parts = []
+    if flag(cmd, 'rec_fixed_w') != '1':
+        parts.append('resolved readout')
+        if flag(cmd, 'cross_fit') == '1': parts.append('cross-fit')
+        if flag(cmd, 'n_est'): parts.append('n_est %s' % flag(cmd, 'n_est'))
+        if flag(cmd, 'ridge'): parts.append('ridge %s' % flag(cmd, 'ridge'))
+    bs = flag(cmd, 'rec_bs', '0')
+    if bs != '4096': parts.append('whole batch' if bs == '0' else 'batch %s' % bs)
+    lr, cos = flag(cmd, 'lr_coef', '1'), flag(cmd, 'b_cosine') == '1'
+    if lr != '3' or not cos: parts.append('lr x%s %s' % (lr, 'cosine' if cos else 'constant'))
+    if flag(cmd, 'ortho_coef') not in (None, '0'): parts.append('ortho %s' % flag(cmd, 'ortho_coef'))
+    return parts
+
+
+def free_variant(cmd):
+    ref = flag(cmd, 'finetune') == 'reward_critic'
+    name = 'E3 phase 1' if ref else (', '.join(free_parts(cmd)) or 'E3-like')
+    extra = []
+    nl = int(flag(cmd, 'n_labeled', '10000'))
+    if nl != 10000: extra.append('%sk labels' % (nl // 1000))
+    if flag(cmd, 'tasks') != 'run': extra.append(flag(cmd, 'tasks'))
+    return name + (' (%s)' % ', '.join(extra) if extra else '')
+
+
+FREE_PANELS = {      # key = free_parts joined by ', ' (run, 10k labels); value = panels whose line it is
+    'resolved readout': ['readout (run, 10k labels)', 'ridge of the resolved readout', 'labels, resolved readout'],
+    'resolved readout, cross-fit': ['readout (run, 10k labels)'],
+    'resolved readout, n_est 16384': ['readout (run, 10k labels)'],
+    'resolved readout, ridge 1e-2': ['ridge of the resolved readout'],
+    'resolved readout, ridge 1e-1': ['ridge of the resolved readout'],
+    'batch 1024': ['batch size'], 'whole batch': ['batch size'],
+    'lr x1 cosine': ['learning rate'], 'lr x1 constant': ['learning rate'], 'lr x3 constant': ['learning rate'], 'lr x10 cosine': ['learning rate'],
+    'ortho 0.01': ['ortho term, no L_FB'], 'ortho 0.1': ['ortho term, no L_FB'], 'ortho 1': ['ortho term, no L_FB'],
+}
+FREE_ORDER = list(FREE_PANELS)
+FREE_TASKS = ['run', 'walk', 'stand', 'flip', 'vel8']
+HOME = ['readout (run, 10k labels)', 'ridge of the resolved readout', 'batch size', 'learning rate', 'ortho term, no L_FB']   # panels with the E3-like line
+
+
+def free_class(cmd):
+    """(variant, order, panels, series, is_reference) of a free-round run. Panels are separated by '|'; series is the line name in each panel.
+    A reference is named '<name of its partner line> (E3 phase 1)', which gives it the color of the partner."""
+    ref = flag(cmd, 'finetune') == 'reward_critic'
+    nl, task = int(flag(cmd, 'n_labeled', '10000')), flag(cmd, 'tasks')
+    parts = [] if ref else free_parts(cmd)
+    key, tag = ', '.join(parts), ' (E3 phase 1)' if ref else ''
+    memb = []
+    if task == 'run' and nl == 10000:
+        if ref or not parts:
+            memb = [(pn, 'E3 phase 1' if ref else 'E3-like') for pn in HOME]
+            memb += [('number of labels', '10k labels' + tag), ('task', 'run' + tag)]
+        else:
+            memb = [(pn, key) for pn in FREE_PANELS.get(key, [])]
+            if key == 'resolved readout':
+                memb = [(pn, '10k labels' if pn.startswith('labels') else key) for pn, _ in memb]
+    elif not parts or parts == ['resolved readout']:
+        base = '%dk labels' % (nl // 1000) if task == 'run' else task
+        if parts:
+            memb = [('labels, resolved readout', base)]
+        else:
+            memb = [('number of labels' if task == 'run' else 'task', base + tag)]
+    if not memb:
+        memb = [('', free_variant(cmd))]
+    if task == 'run' and nl == 10000 and not parts:
+        order = 0
+    elif key in FREE_ORDER:
+        order = 1 + FREE_ORDER.index(key)
+    else:
+        order = 200 + FREE_TASKS.index(task) * 10 if task in FREE_TASKS and task != 'run' else 100 + nl // 1000
+    return free_variant(cmd), order, '|'.join(m[0] for m in memb), '|'.join(m[1] for m in memb), ref
+
 
 def lrec_class(cmd):
-    """(variant, order, panel, is_reference). Round 2 panels: 'lam sweep (10k labels)' and 'other changes at lam 100' ('|' = several panels)."""
-    v = lrec_variant(cmd)
-    LAM, OTH = 'lam sweep (10k labels)', 'other changes at lam 100'
+    """(variant, order, panel, series, is_reference) for fb_continual_temp.py runs."""
+    if is_free(cmd):
+        return free_class(cmd)
+    v = lrec_round1(cmd)
     R1A, R1B = 'round 1: single changes', 'round 1: combined changes'
     if v.startswith('reference'):
-        if flag(cmd, 'eval_rollouts') is None:
-            return v, 0, R1A + '|' + R1B, True
-        return v, 0 if '10k' in v else 1, (LAM + '|' + OTH) if '10k' in v else OTH, True
-    if flag(cmd, 'eval_rollouts') is None:          # round 1
-        single = ('baseline', 'lam 100', 'fixed readout', 'minibatch 4096', 'B lr x3 + cosine')
-        name = v[len('round 1: '):]
-        order = 2 + len(name)
-        if name.startswith('baseline'):
-            return v, 1, R1A + '|' + R1B, False
-        return v, order, R1A if name in single else R1B, False
-    lam = int(float(flag(cmd, 'lam', '1')))
-    if v == 'lam %d' % lam:
-        return v, 10 + lam // 10, (LAM + '|' + OTH) if lam == 100 else LAM, False
-    return v, 100 + len(v), OTH, False
+        return v, 0, R1A + '|' + R1B, 'E3 phase 1|E3 phase 1', True
+    single = ('baseline', 'lam 100', 'fixed readout', 'minibatch 4096', 'B lr x3 + cosine')
+    name = v[len('round 1: '):]
+    if name.startswith('baseline'):
+        return v, 1, R1A + '|' + R1B, 'baseline|baseline', False
+    return v, 2 + len(name), R1A if name in single else R1B, name, False
 
 def describe(j):
     cmd, st = j['command'] or '', j['status']
     arr = j['arrayJob'] or j['jobId']
     tail = ''
     if 'fb_continual_temp.py' in cmd:
-        v = lrec_variant(cmd)
+        v = free_variant(cmd) if is_free(cmd) else lrec_round1(cmd)
         title = 'L_rec vs E3 phase 1: %s' % v
-        desc = ('Walker run, 10k labels. Which differences between L_rec (continual) and fit_backward_to_reward (E3 phase 1) make B regress onto the reward as well? '
-                'Run of fb_continual_temp.py, variant: %s. Single stage of %s updates, mu_b=mu_q=0. Metric: held-out eps and correlation of the reward reconstruction '
-                '(eval_log.csv, run_fresh_eps and run_fit_eps).' % (v, flag(cmd, 'steps_per_stage')))
+        desc = ('Which differences between L_rec (continual) and fit_backward_to_reward (E3 phase 1) make B regress onto the reward as well? '
+                'Run of fb_continual_temp.py on walker %s, %s labeled states, variant: %s. ' % (flag(cmd, 'tasks'), flag(cmd, 'n_labeled'), v))
+        if is_free(cmd):
+            desc += ('B is driven by L_rec alone (fb_objective=0, no L_FB), %s updates, no rollouts. E3-like = fixed readout, batch 4096, B lr x3 with cosine '
+                     'decay, ortho_coef=0; the reference is fit_backward_to_reward itself (30k B-only steps). Metric: held-out eps (eval_log.csv, %s_fresh_eps).'
+                     % (flag(cmd, 'steps_per_stage'), flag(cmd, 'tasks')))
+        else:
+            desc += 'Single stage of %s updates, mu_b=mu_q=0. Metric: held-out eps and correlation of the reward reconstruction.' % flag(cmd, 'steps_per_stage')
     elif 'fb_critic_oracle.py' in cmd:
         real = flag(cmd, 'q_true_reward')
         what = 'true task reward' if real == '1' else 'implicit reward B Sigma^-1 z'
@@ -151,7 +214,7 @@ FAMILIES = {
     'finetune-ablation': ('E3 ablation: warm start, lr, tau', 5,
                           'Walker run, 10k labels, 1M steps. E3 (finetune=reward_critic) with F and the actor re-initialised and/or the TD3 learning rate (3e-4) and target tau (0.005), to explain the gap to the TD3 reference R2. Two runs per variant.'),
     'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 6,
-                    'Walker run, one stage of 60k updates, mu_b=mu_q=0. Variants of the L_rec path of fb_continual_temp.py compared with E3 phase 1 (dashed line) on how well B reconstructs the reward (held-out eps, log scale) and at what price in orthonormality of B (orth_l2). Round 1 also has returns.'),
+                    'Walker, one stage, mu_b=mu_q=0, no rollouts. Variants of the L_rec path of fb_continual_temp.py compared with E3 phase 1 (dashed lines) on how well B reconstructs the reward (held-out eps, log scale). Round 1 (60k updates, L_FB on or off, with returns) and the free round (L_rec alone, 30k updates, 60 runs).'),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
 }
@@ -167,8 +230,8 @@ def classify(j):
     On the Results tab a panel is one chart and a series is one line of it (same series name = same color across panels)."""
     cmd = j['command'] or ''
     if 'fb_continual_temp.py' in cmd:
-        v, order, panel, ref = lrec_class(cmd)
-        return 'lrec-vs-fit', v, order, panel, v.replace('round 1: ', ''), ref
+        v, order, panel, series, ref = lrec_class(cmd)
+        return 'lrec-vs-fit', v, order, panel, series, ref
     if 'fb_critic_oracle.py' in cmd:
         real = flag(cmd, 'q_true_reward')
         v = 'true reward' if real == '1' else 'implicit reward'
@@ -202,6 +265,8 @@ def classify(j):
 n = 0
 os.makedirs('hpc/status/tracking_family', exist_ok=True)
 for raw, j in jobs.items():
+    if j.get('children'):             # a job that ran several commands: its children are tracked, not the job
+        continue
     if not j.get('command'):          # pending array range (or a job whose log has no 'Running:' line yet): no command to read
         if '[' not in raw:
             continue
@@ -220,5 +285,5 @@ for raw, j in jobs.items():
     print(raw, j['status'], '|', fam, '|', var)
 print(n)
 fam_docs = {k: {'title': v[0], 'order': v[1], 'description': v[2]} for k, v in FAMILIES.items()}
-fam_docs['lrec-vs-fit'].update({'plots': ['eps', 'orth'], 'table': 'eps'})
+fam_docs['lrec-vs-fit'].update({'plots': ['eps', 'orth'], 'table': 'eps', 'plotPanels': {'orth': ['ortho term, no L_FB']}})
 json.dump(fam_docs, open('hpc/status/families.json', 'w'), indent=1)

@@ -24,8 +24,8 @@ def _num(x):
 
 
 def _task(cmd):
-    m = re.search(r'(?:^|\s)tasks?=(\S+)', cmd or '')
-    return m.group(1).split(',')[0] if m else None
+    m = re.findall(r'(?:^|\s)tasks?=(\S+)', cmd or '')      # the last one wins, as in parse_kwargs
+    return m[-1].split(',')[0] if m else None
 
 
 def _orth_last(folder):

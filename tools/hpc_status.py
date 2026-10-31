@@ -138,8 +138,47 @@ def read_details(jobs, ids):
     return res
 
 
+def split_commands(cmd):
+    """The python commands of a job whose script runs several of them in a row ('python a ...; python b ...')."""
+    return [c.strip() for c in (cmd or '').split(';') if c.strip().startswith('python ')]
+
+
+def expand_children(known):
+    """A job that runs several commands (one run folder each) gets one child entry per command, so that the tracker can follow
+    every run: id '<jobId>.<i>' (i from 0), same Slurm fields, its own command and run folder. The parent is kept and marked
+    with its 'children'. Children are rebuilt at every check. A finished job whose folders do not match its commands is left whole."""
+    for r in [r for r, j in known.items() if j.get('parentJob')]:
+        del known[r]
+    for r, j in list(known.items()):
+        j.pop('children', None)
+        cmds, folders = split_commands(j.get('command')), j.get('runFolders') or []
+        if len(cmds) < 2 or (j['status'] not in ('running', 'pending') and len(folders) != len(cmds)):
+            continue
+        kids = []
+        for i, c in enumerate(cmds):
+            started = i < len(folders)
+            last = started and i == len(folders) - 1
+            if started and not last:
+                st = 'finished'
+            elif last:
+                st = j['status']
+            else:
+                st = 'pending' if j['status'] in ('running', 'pending') else j['status']
+            kid = dict(j, jobId='%s.%d' % (r, i), parentJob=r, command=c, runFolders=[folders[i]] if started else [],
+                       status=st, lastLine=j.get('lastLine', '') if last and st == 'running' else '',
+                       err=j.get('err', '') if last and st == 'failed' else '', results=None)
+            kid.pop('children', None)
+            if j.get('arrayIndex') is not None:
+                kid['arrayIndex'] = '%s.%d' % (j['arrayIndex'], i)
+            elif j.get('arrayJob'):
+                kid['arrayIndex'] = str(i)
+            known[kid['jobId']] = kid
+            kids.append(kid['jobId'])
+        j['children'] = kids
+
+
 def digest(job):
-    keys = ('state', 'reason', 'elapsed', 'start', 'end', 'exit', 'node', 'command', 'runFolders', 'lastLine', 'err', 'results')
+    keys = ('state', 'reason', 'children', 'parentJob', 'elapsed', 'start', 'end', 'exit', 'node', 'command', 'runFolders', 'lastLine', 'err', 'results')
     return hashlib.md5(json.dumps([job.get(k) for k in keys], sort_keys=True).encode()).hexdigest()
 
 
@@ -208,7 +247,8 @@ def main():
 
     try:
         fresh = list_jobs(args.since)
-        known = {r: j for r, j in load(JOBS, {}).items() if (j.get('submit') or '') >= args.since and not str(j.get('arrayIndex') or '').startswith('[')}
+        known = {r: j for r, j in load(JOBS, {}).items() if (j.get('submit') or '') >= args.since and not str(j.get('arrayIndex') or '').startswith('[')
+                 and not j.get('parentJob')}
         need = [r for r, j in fresh.items() if r not in known or known[r].get('state') not in FINAL
                 or known[r].get('status') != j['status'] or not known[r].get('command')]
         details = read_details(fresh, need)
@@ -224,6 +264,7 @@ def main():
     first_run = not os.path.exists(JOBS)
     trans = transitions({r: j.get('status') for r, j in known.items()}, fresh)
     known.update(fresh)
+    expand_children(known)
     for j in known.values():          # headline numbers from the synced logs (run tools/sync_from_hpc.sh first)
         j['results'] = job_results.headline(j)
     with open(JOBS, 'w') as f:

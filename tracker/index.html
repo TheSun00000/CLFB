@@ -585,6 +585,10 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
             fmt: function (v) { return v.toFixed(2); }, log: false }
   };
   function panelsOf(j) { return String(j.panel || "").split("|"); }
+  function seriesIn(j, pn) {      // 'series' can hold one name per panel, separated by '|'
+    var ps = panelsOf(j), ss = String(j.series || "").split("|"), k = ps.indexOf(pn);
+    return ss.length === ps.length && k >= 0 ? ss[k] : ss[0];
+  }
   function renderCharts(famJobs, info) {
     if (!loaded.curves) return null;
     var keys = (info && info.plots) || ["return"], wrap = el("div"), any = false;
@@ -594,23 +598,25 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
       if (!list.length) return;
       var firstOrder = {};
       list.forEach(function (j) { panelsOf(j).forEach(function (pn) { if (firstOrder[pn] == null || j.order < firstOrder[pn]) firstOrder[pn] = j.order; }); });
-      var panels = Object.keys(firstOrder).sort(function (a, b) { return firstOrder[a] - firstOrder[b]; });
+      var allowed = info && info.plotPanels && info.plotPanels[pk];
+      var panels = Object.keys(firstOrder).filter(function (pn) { return pn && (!allowed || allowed.indexOf(pn) >= 0); })
+        .sort(function (a, b) { return firstOrder[a] - firstOrder[b]; });
       var grid = el("div", "charts");
       panels.forEach(function (pn) {
         var inP = list.filter(function (j) { return panelsOf(j).indexOf(pn) >= 0; });
         var ord = {};
-        inP.forEach(function (j) { if (!j.ref && (ord[j.series] == null || j.order < ord[j.series])) ord[j.series] = j.order; });
+        inP.forEach(function (j) { var sn = seriesIn(j, pn); if (!j.ref && (ord[sn] == null || j.order < ord[sn])) ord[sn] = j.order; });
         var names = Object.keys(ord).sort(function (a, b) { return ord[a] - ord[b]; }).slice(0, 5), series = [];
-        function runsOf(nm, ref) { return inP.filter(function (j) { return !!j.ref === ref && j.series === nm; }).map(function (j) { return m.get(data.curves[j.jobId]); }); }
+        function runsOf(nm, ref) { return inP.filter(function (j) { return !!j.ref === ref && seriesIn(j, pn) === nm; }).map(function (j) { return m.get(data.curves[j.jobId]); }); }
         names.forEach(function (nm, idx) {
           var runs = runsOf(nm, false);
           if (runs.length) series.push({ name: nm, color: "var(--s" + (idx + 1) + ")", agg: aggregate(runs) });
         });
         var refs = {};
-        inP.forEach(function (j) { if (j.ref) refs[j.series] = 1; });
+        inP.forEach(function (j) { if (j.ref) refs[seriesIn(j, pn)] = 1; });
         Object.keys(refs).forEach(function (nm) {
-          var runs = runsOf(nm, true);
-          if (runs.length && series.length) series.push({ name: nm, color: "var(--muted)", ref: true, agg: aggregate(runs) });
+          var runs = runsOf(nm, true), partner = nm.replace(/ \(E3 phase 1\)$/, ""), pi = names.indexOf(partner);   // a reference shares the color of its partner line
+          if (runs.length && series.length) series.push({ name: nm, color: pi >= 0 ? "var(--s" + (pi + 1) + ")" : "var(--muted)", ref: true, agg: aggregate(runs) });
         });
         if (series.length) grid.appendChild(drawChart(pn, series, { log: m.log, fmt: m.fmt }));
       });
@@ -653,7 +659,9 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
         if (epsTable) {
           function col(key, dec) {
             var a = g.map(function (j) { return j.results[key]; }).filter(function (v) { return v != null; });
-            return a.length ? stats(a).m.toFixed(dec) : "";
+            if (!a.length) return "";
+            var st = stats(a);
+            return st.m.toFixed(dec) + (st.sd != null ? " ± " + st.sd.toFixed(dec) : "");
           }
           tr.appendChild(el("td", null, vk));
           tr.appendChild(el("td", "mono", g.length === 1 ? "1 run" : String(g.length)));

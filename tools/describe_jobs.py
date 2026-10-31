@@ -13,6 +13,18 @@ def flag(cmd, k, default=None):
     m = re.search(r'(?:^|\s)%s=(\S+)' % re.escape(k), cmd)
     return m.group(1) if m else default
 
+def abl(cmd):
+    """Variant name of an E3 ablation (reinit_critic / lr / fb_target_tau overrides), '' if the command is a plain run."""
+    parts = []
+    if flag(cmd, 'reinit_critic') == '1':
+        parts.append('F and actor re-initialised')
+    if flag(cmd, 'lr') or flag(cmd, 'fb_target_tau'):
+        parts.append('lr %s, tau %s' % (flag(cmd, 'lr', 'default'), flag(cmd, 'fb_target_tau', 'default')))
+    return ' + '.join(parts)
+
+def abl_text(cmd):
+    return abl(cmd) + ' (the TD3 reference uses lr 3e-4, tau 0.005, a critic from scratch)'
+
 def describe(j):
     cmd, st = j['command'] or '', j['status']
     arr = j['arrayJob'] or j['jobId']
@@ -63,6 +75,10 @@ def describe(j):
         e, how = names[ft]
         title = 'Fine-tune FB, %s (%s), %s labeled states, %s' % (ft, e, nl, task)
         desc = ('Single-task adaptation of a pretrained FB on walker %s, 1M steps: %s.' % (task, how))
+        if abl(cmd):
+            title = 'E3 ablation, %s, %s labeled states' % (abl(cmd), nl)
+            desc = ('Why is R2 (TD3 from scratch on the fine-tuned-B reward) better than E3? Same as E3 (finetune=reward_critic, walker %s, 1M steps) '
+                    'but with: %s. Control: the E3 runs of the finetune family.' % (task, abl_text(cmd)))
         if arr == '1744529':
             tail = ' Cancelled after about 2 minutes; this submission used task=walk and was resubmitted on task=run as job 1744592.'
     if arr == '1744529' and 'offline_rl_approx.py' in cmd:
@@ -77,6 +93,8 @@ FAMILIES = {
                'Walker run, 200k steps. B frozen; F and the actor fine-tuned with the Q loss only. The TD target uses either the true task reward (oracle) or the implicit reward B Sigma^-1 z.'),
     'finetune': ('Fine-tuning FB vs TD3 references', 3,
                  'Single-task adaptation of a pretrained FB (E1 actor only, E2 critic, E3 reward regression on B then critic) against TD3 from scratch on the two rewards the critics train on (R1 pretrained B, R2 fine-tuned B), for two label budgets. 1M steps.'),
+    'finetune-ablation': ('E3 ablation: warm start, lr, tau', 5,
+                          'Walker run, 10k labels, 1M steps. E3 (finetune=reward_critic) with F and the actor re-initialised and/or the TD3 learning rate (3e-4) and target tau (0.005), to explain the gap to the TD3 reference R2. Two runs per variant.'),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
 }
@@ -113,6 +131,8 @@ def classify(j):
         return ('finetune', '%s, %s labels%s' % (name, kilo(an), suffix), (4 if ref == 'R1' else 5) * 10 + (0 if an == '100000' else 1),
                 '%s labels%s' % (kilo(an), suffix), name)
     ft, nl = flag(cmd, 'finetune'), flag(cmd, 'n_labeled')
+    if abl(cmd):
+        return 'finetune-ablation', abl(cmd), 10 + len(abl(cmd)), '', abl(cmd)
     idx = {'actor': 1, 'critic': 2, 'reward_critic': 3}[ft]
     name = {'actor': 'E1 actor only', 'critic': 'E2 critic (B frozen)', 'reward_critic': 'E3 reward regression + critic'}[ft]
     return ('finetune', '%s, %s labels%s' % (name, kilo(nl), suffix), idx * 10 + (0 if nl == '100000' else 1),
@@ -122,11 +142,18 @@ def classify(j):
 n = 0
 os.makedirs('hpc/status/tracking_family', exist_ok=True)
 for raw, j in jobs.items():
-    t, d = describe(j)
-    fam, var, order, panel, series = classify(j)
+    if not j.get('command'):          # pending array range (or a job whose log has no 'Running:' line yet): no command to read
+        if '[' not in raw:
+            continue
+        t, d = 'Queued array %s (%s)' % (j['arrayJob'], j['script']), \
+            'Tasks %s of this array have not started yet; they appear as separate jobs when they do. Waiting reason is shown in the status column.' % j['arrayIndex']
+        fam, var, order, panel, series = '', '', 0, '', ''
+    else:
+        t, d = describe(j)
+        fam, var, order, panel, series = classify(j)
     json.dump({'tracked': True, 'title': t, 'description': d, 'family': fam, 'variant': var, 'order': order, 'panel': panel, 'series': series},
-              open('hpc/status/tracking/%s.json' % raw, 'w'))
-    json.dump({'family': fam, 'variant': var, 'order': order, 'panel': panel, 'series': series}, open('hpc/status/tracking_family/%s.json' % raw, 'w'))
+              open('hpc/status/tracking/%s.json' % raw.replace('[', '').replace(']', ''), 'w'))
+    json.dump({'family': fam, 'variant': var, 'order': order, 'panel': panel, 'series': series}, open('hpc/status/tracking_family/%s.json' % raw.replace('[', '').replace(']', ''), 'w'))
     n += 1
     print(raw, j['status'], '|', fam, '|', var)
 print(n)

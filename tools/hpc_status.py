@@ -65,13 +65,16 @@ def status_of(state):
 
 def list_jobs(since):
     out = ssh('cd "%s" || exit 1\necho @@SCRIPTS; ls scripts\necho @@SACCT\n'
-              'sacct -u "$USER" -S %s -X -n -P --format=%s\n' % (REMOTE_DIR, since, SACCT_FIELDS))
-    scripts, jobs, mode = set(), {}, None
+              'sacct -u "$USER" -S %s -X -n -P --format=%s\n'
+              'echo @@SQUEUE; squeue -h -u "$USER" -t PENDING -o "%%i|%%R"\n' % (REMOTE_DIR, since, SACCT_FIELDS))
+    scripts, jobs, mode, reasons = set(), {}, None, {}
     for line in out.splitlines():
         if line.startswith('@@'):
             mode = line[2:]
         elif mode == 'SCRIPTS' and line.strip():
             scripts.add(line.strip())
+        elif mode == 'SQUEUE' and '|' in line:
+            reasons[line.split('|')[0].strip()] = line.split('|', 1)[1].strip()
         elif mode == 'SACCT' and line.strip():
             f = line.split('|')
             if len(f) < len(SACCT_FIELDS.split(',')):
@@ -80,13 +83,20 @@ def list_jobs(since):
             if name not in scripts:          # only jobs launched from scripts/
                 continue
             array_id, _, idx = jid.partition('_')
-            if idx.startswith('[') or submit < since:   # not-yet-started array range, or older than the window
+            if submit < since:                          # older than the window
                 continue
+            if idx.startswith('['):                     # array range whose tasks have not started: one row, keyed by its sacct id
+                if status_of(state) != 'pending':       # (a cancelled range never ran: not listed)
+                    continue
+                raw = jid
             jobs[raw] = {
                 'jobId': raw, 'arrayJob': array_id if idx else None, 'arrayIndex': idx or None,
                 'script': name, 'state': state.split()[0], 'status': status_of(state), 'elapsed': elapsed,
                 'submit': submit, 'start': start, 'end': end, 'exit': exitc, 'partition': part, 'node': node,
             }
+    for raw, j in jobs.items():                         # why a pending job waits (QOSGrpCpuLimit, Priority, Resources, ...)
+        if j['status'] == 'pending':
+            j['reason'] = reasons.get(raw) or reasons.get(j['arrayJob'] or '', '') or reasons.get('%s_%s' % (j['arrayJob'], j['arrayIndex']), '')
     return jobs
 
 
@@ -129,7 +139,7 @@ def read_details(jobs, ids):
 
 
 def digest(job):
-    keys = ('state', 'elapsed', 'start', 'end', 'exit', 'node', 'command', 'runFolders', 'lastLine', 'err', 'results')
+    keys = ('state', 'reason', 'elapsed', 'start', 'end', 'exit', 'node', 'command', 'runFolders', 'lastLine', 'err', 'results')
     return hashlib.md5(json.dumps([job.get(k) for k in keys], sort_keys=True).encode()).hexdigest()
 
 

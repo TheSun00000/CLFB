@@ -340,6 +340,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
   var STATUS_ORDER = { running: 0, pending: 1, failed: 2, finished: 3, cancelled: 4 };
   function jobTime(j) { return String(j.submit || j.start || ""); }
   function fmtTime(t) { return t && t !== "Unknown" ? t.replace("T", " ").slice(0, 16) : ""; }
+  function tkey(id) { return String(id).replace(/[\[\]]/g, ""); }   // doc ids cannot hold brackets: 1780904_[1-5] -> 1780904_1-5
   function jobLabel(j) { return j.arrayJob ? j.arrayJob + "_" + j.arrayIndex : j.jobId; }
 
   function jobsTable(rows, tracked) {
@@ -359,6 +360,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
       }
       var cs = el("td"); cs.appendChild(pill(j.status || "pending"));
       if (j.state && j.state !== String(j.status || "").toUpperCase()) cs.appendChild(el("div", "sub mono", j.state));
+      if (j.status === "pending" && j.reason) cs.appendChild(el("div", "sub mono", j.reason));
       tr.appendChild(cs);
       var cc = el("td", "wide");
       if (j.command) cc.appendChild(el("div", "cmd", j.command));
@@ -385,7 +387,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
         var ca = el("td");
         if (canWrite) {
           var b = el("button", null, "Track");
-          b.addEventListener("click", function () { db.collection("tracking").doc(j.id).set({ tracked: true, title: j.title || "", description: j.description || "" }).catch(function () {}); });
+          b.addEventListener("click", function () { db.collection("tracking").doc(tkey(j.id)).set({ tracked: true, title: j.title || "", description: j.description || "" }).catch(function () {}); });
           ca.appendChild(b);
         }
         tr.appendChild(ca);
@@ -399,7 +401,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     var out = $("expOut"), oth = $("otherOut"), cnt = $("expCounts"); clear(out); clear(oth); clear(cnt);
     var f = $("expFilter").value;
     var all = data.jobs.map(function (j) {
-      var t = data.tracking[j.jobId] || {};
+      var t = data.tracking[tkey(j.jobId)] || {};
       return Object.assign({}, j, { id: j.jobId, tracked: !!t.tracked, title: t.title || "", description: t.description || "", family: t.family || "", variant: t.variant || "", order: t.order || 0 });
     });
     var counts = {};
@@ -587,7 +589,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
   function renderResults() {
     var out = $("resOut"); clear(out);
     var jobs = data.jobs.map(function (j) {
-      var t = data.tracking[j.jobId] || {};
+      var t = data.tracking[tkey(j.jobId)] || {};
       return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0, panel: t.panel || "", series: t.series || t.variant || "" });
     }).filter(function (j) { return j.tracked && j.status === "finished" && j.results && j.family; });
     if (!jobs.length) {

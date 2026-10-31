@@ -25,11 +25,30 @@ def abl(cmd):
 def abl_text(cmd):
     return abl(cmd) + ' (the TD3 reference uses lr 3e-4, tau 0.005, a critic from scratch)'
 
+def lrec_variant(cmd):
+    """Variant of an fb_continual_temp.py run of the L_rec-vs-fit_backward_to_reward study."""
+    if flag(cmd, 'finetune') == 'reward_critic':
+        return 'reference: E3 phase 1 (fit_backward_to_reward)'
+    parts = []
+    if flag(cmd, 'rec_fixed_w') == '1': parts.append('fixed readout')
+    if flag(cmd, 'rec_bs'): parts.append('minibatch %s' % flag(cmd, 'rec_bs'))
+    if flag(cmd, 'lr_coef'): parts.append('B lr x%s' % flag(cmd, 'lr_coef'))
+    if flag(cmd, 'b_cosine') == '1': parts.append('cosine')
+    if flag(cmd, 'fb_objective') == '0': parts.append('B driven by L_rec only')
+    if flag(cmd, 'lam') and flag(cmd, 'lam') != '10': parts.append('lam %s' % flag(cmd, 'lam'))
+    return ' + '.join(parts) or 'baseline L_rec (lam 10)'
+
 def describe(j):
     cmd, st = j['command'] or '', j['status']
     arr = j['arrayJob'] or j['jobId']
     tail = ''
-    if 'fb_critic_oracle.py' in cmd:
+    if 'fb_continual_temp.py' in cmd:
+        v = lrec_variant(cmd)
+        title = 'L_rec vs E3 phase 1: %s' % v
+        desc = ('Walker run, 10k labels. Which differences between L_rec (continual) and fit_backward_to_reward (E3 phase 1) make B regress onto the reward as well? '
+                'Run of fb_continual_temp.py, variant: %s. Single stage of %s updates, mu_b=mu_q=0. Metric: held-out eps and correlation of the reward reconstruction '
+                '(eval_log.csv, run_fresh_eps and run_fit_eps).' % (v, flag(cmd, 'steps_per_stage')))
+    elif 'fb_critic_oracle.py' in cmd:
         real = flag(cmd, 'q_true_reward')
         what = 'true task reward' if real == '1' else 'implicit reward B Sigma^-1 z'
         seed = [t for t in cmd.split() if t.startswith('seed=')][-1].split('=')[1]
@@ -95,6 +114,8 @@ FAMILIES = {
                  'Single-task adaptation of a pretrained FB (E1 actor only, E2 critic, E3 reward regression on B then critic) against TD3 from scratch on the two rewards the critics train on (R1 pretrained B, R2 fine-tuned B), for two label budgets. 1M steps.'),
     'finetune-ablation': ('E3 ablation: warm start, lr, tau', 5,
                           'Walker run, 10k labels, 1M steps. E3 (finetune=reward_critic) with F and the actor re-initialised and/or the TD3 learning rate (3e-4) and target tau (0.005), to explain the gap to the TD3 reference R2. Two runs per variant.'),
+    'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 6,
+                    'Walker run, 10k labels. Variants of the L_rec path of fb_continual_temp.py (fixed readout, minibatch, B lr and cosine decay, B driven by L_rec only) compared with E3 phase 1 on how well B reconstructs the reward (held-out eps, correlation). Returns are secondary.'),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
 }
@@ -109,6 +130,9 @@ def classify(j):
     """(family, variant, order, panel, series): jobs with the same family and variant are repeats of one configuration.
     On the Results tab a panel is one chart and a series is one line of it (same series name = same color across panels)."""
     cmd = j['command'] or ''
+    if 'fb_continual_temp.py' in cmd:
+        v = lrec_variant(cmd)
+        return 'lrec-vs-fit', v, 0 if v.startswith('reference') else (1 if v.startswith('baseline') else 2 + len(v)), '', v
     if 'fb_critic_oracle.py' in cmd:
         real = flag(cmd, 'q_true_reward')
         v = 'true reward' if real == '1' else 'implicit reward'

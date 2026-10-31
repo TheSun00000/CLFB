@@ -347,7 +347,7 @@ details.allruns .tablebox { margin-top: 8px; }
 <script>
 (function () {
   var ROUTES = ["overview", "experiments", "results", "updates", "next", "slides"];
-  var data = { evalTasks: null, taskCorr: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
+  var data = { evalTasks: null, taskCorr: null, bonly: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
   var loaded = { jobs: false, tracking: false, families: false, curves: false, updates: false, todos: false, slides: false };
   var db = null, canWrite = false, deckIdx = 0;
 
@@ -715,6 +715,35 @@ details.allruns .tablebox { margin-top: 8px; }
     wrap.appendChild(el("p", "chartnote", "latent: the latent inferred from labelled states of the task; random: a random vector on the sphere; gain = latent minus random. Grey: within 40."));
     return wrap;
   }
+  function buildBonly() {     // B-only learnability: reward error of the pretrained B and of B after a fit on the labelled states, per task and label budget
+    var d = data.bonly; if (!d || !d.rows) return null;
+    var tasks = [], byKey = {};
+    d.rows.forEach(function (r) { if (tasks.indexOf(r.task) < 0) tasks.push(r.task); byKey[r.task + "|" + r.labels] = r; });
+    var labels = [10000, 100000], box = el("div", "tablebox"), t = el("table"), h1 = el("tr"), h2 = el("tr");
+    h1.appendChild(el("th", null, "")); h1.appendChild(el("th", "num", ""));
+    labels.forEach(function (L) { var c = el("th", "num", (L / 1000) + "k labelled states"); c.colSpan = 2; h1.appendChild(c); });
+    h2.appendChild(el("th", null, "Task")); h2.appendChild(el("th", "num", "Satisfied"));
+    labels.forEach(function () { h2.appendChild(el("th", "num", "pretrained B")); h2.appendChild(el("th", "num", "after the fit")); });
+    var th = el("thead"); th.appendChild(h1); th.appendChild(h2); t.appendChild(th);
+    var tb = el("tbody");
+    tasks.forEach(function (tk) {
+      var tr = el("tr"); tr.appendChild(el("td", null, tk));
+      var any = byKey[tk + "|10000"] || byKey[tk + "|100000"];
+      tr.appendChild(el("td", "num", any ? (any.sat < 1 ? any.sat.toFixed(1) : any.sat.toFixed(0)) + " %" : ""));
+      labels.forEach(function (L) {
+        var r = byKey[tk + "|" + L];
+        tr.appendChild(el("td", "num", r ? r.pre.toFixed(3) : ""));
+        var c = el("td", "num", r ? r.resolved_after.toFixed(3) : "");
+        if (r) { c.style.fontWeight = "700"; c.className = "num " + (r.resolved_after <= 0.05 ? "up" : "down"); }
+        tr.appendChild(c);
+      });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); box.appendChild(t);
+    var wrap = el("div", "alltasks"); wrap.appendChild(box);
+    wrap.appendChild(el("p", "chartnote", "Held-out reward error eps (0 = perfect, 1 = nothing explained). Green: eps after the fit <= 0.05, i.e. B encodes the task."));
+    return wrap;
+  }
   function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)
     var d = data.evalTasks; if (!d || !d.rows || !d.rows.length) return null;
     var tasks = d.tasks, base = null;
@@ -755,6 +784,14 @@ details.allruns .tablebox { margin-top: 8px; }
         var mb = el("div", "fig"); mb.style.gridColumn = "1 / -1";
         mb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) mb.appendChild(el("p", "fig-why", f.why)); mb.appendChild(mx);
         wrap.appendChild(mb); any = true; return;
+      }
+      if (f.type === "bonly") {
+        var bt = buildBonly();
+        if (!bt) return;
+        var bb = el("div", "fig"); bb.style.gridColumn = "1 / -1";
+        bb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) bb.appendChild(el("p", "fig-why", f.why));
+        var lgb = legendEl(f.legend); if (lgb) bb.appendChild(lgb); bb.appendChild(bt);
+        wrap.appendChild(bb); any = true; return;
       }
       if (f.type === "latentcontrol") {
         var lc = buildControl();
@@ -956,6 +993,7 @@ details.allruns .tablebox { margin-top: 8px; }
           if (d.id === "curves" || /^curves_\d+$/.test(d.id)) Object.assign(all, (d.data() || {}).curves || {});
           if (d.id === "eval_all_tasks") data.evalTasks = d.data() || null;
           if (d.id === "task_corr") data.taskCorr = d.data() || null;
+          if (d.id === "bonly") data.bonly = d.data() || null;
         });
         data.curves = all;
         loaded.curves = true; renderAll();

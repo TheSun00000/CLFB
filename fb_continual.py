@@ -16,7 +16,8 @@ Flags:
                    labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip
                            quadruped: stand walk run jump | pointmaze: goal_0_20 goal_20_20 goal_20_0 goal_4_4 goal_12_12
                            antmaze: goal_bottom ... (see `benchmarks` below)
-    seed=0 discount=0.95
+    seed=<int>               default: random (logged in info.txt)
+    discount=0.95
     steps_per_stage=100000   number of updates per stage (multiple of scan_length)
     scan_length=1000         updates per jitted chunk (= logging granularity)
     n_labeled=10000          size of the labeled set D_k of each task (sampled once per stage, fixed during the stage)
@@ -52,6 +53,9 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    reinit_critic=0         1 (finetune=critic|reward_critic only): F and the actor are re-initialised at random at the start of
+                            the RL steps (after the reward fit, B is kept), instead of starting from the pretrained ones.
+                            Fresh Adam states and target network. Diagnostic: warm start vs. TD3 from scratch.
     Evaluation: '<task>_ft_{mean,std,rew_corr,eps}' = rollouts with z_cond, and the reconstruction quality of the reward the
     critic is trained on (B(s)^T w_fit vs rbar, held-out states). An eval tagged 'ft_start' is run before the RL steps.
     Example:
@@ -112,7 +116,7 @@ from flax import serialization
 import jax.numpy as jnp
 import optax
 
-from _utils.logs import parse_kwargs
+from _utils.logs import parse_kwargs, resolve_seed, run_info
 
 
 class CSVLogger:
@@ -211,7 +215,7 @@ if __name__ == '__main__':
     assert len(TASKS) >= 1, "tasks= must contain at least one task"
     assert len(set(TASKS)) == len(TASKS), f"tasks= must be unique, got {TASKS}"
 
-    SEED = int(kwargs['seed']) if 'seed' in kwargs else 0
+    SEED = resolve_seed(kwargs)
 
     # ── Continual hyper-parameters ────────────────────────────────────────────────
     STEPS_PER_STAGE = int(kwargs['steps_per_stage']) if 'steps_per_stage' in kwargs else 100_000
@@ -233,6 +237,8 @@ if __name__ == '__main__':
     RFIT_LR    = float(kwargs['rfit_lr']) if 'rfit_lr' in kwargs else 3e-4
     RFIT_BS    = int(kwargs['rfit_bs']) if 'rfit_bs' in kwargs else 4096
     RFIT_CHUNK = min(1000, RFIT_STEPS)
+    REINIT_CRITIC = bool(int(kwargs['reinit_critic'])) if 'reinit_critic' in kwargs else False
+    assert not REINIT_CRITIC or FINETUNE in ('critic', 'reward_critic'), "reinit_critic=1 needs finetune=critic or reward_critic"
     assert RFIT_STEPS > 0 and RFIT_STEPS % RFIT_CHUNK == 0, "rfit_steps must be a multiple of 1000 (or < 1000)"
 
     # ── Logging ───────────────────────────────────────────────────────────────────
@@ -278,6 +284,7 @@ if __name__ == '__main__':
 
     with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
         file.write(str(kwargs) + '\n')
+        file.write(run_info())
 
     # ── Reward functions (jnp ports of new_utils/benchmark.py and utils/antmaze_benchmark.py) ──
     # Every reward function has the signature  fn(aux, param) -> array of shape aux.shape[:-1]
@@ -1597,6 +1604,17 @@ if __name__ == '__main__':
             ft_info = (task_idx, task, stage_data.z_cond, stage_data.w_fit, m2_k)
             # step 0 of the fine-tuning: zero-shot policy with z_cond (+ quality of the reward the critic will use)
             run_eval(train_state, k, 0, 'ft_start', [], [], ft_info)
+            if REINIT_CRITIC:
+                # F and the actor from scratch (B kept); target = copy of the new F; fresh Adam states
+                fresh = agent.init(next_stage_key())
+                fb_params = {'forward': fresh.fb_params['forward'], 'backward': train_state.fb_params['backward']}
+                train_state = train_state.replace(
+                    fb_params=fb_params,
+                    fb_target_params=jax.tree_util.tree_map(jnp.copy, fb_params),
+                    actor_params=fresh.actor_params,
+                    fb_optimizer_state=agent.fb_optimizer.init(fb_params),
+                    actor_optimizer_state=agent.actor_optimizer.init(fresh.actor_params))
+                print('reinit_critic=1: F and the actor re-initialised (B kept)')
 
         for chunk in tqdm(range(CHUNKS_PER_STAGE), desc=f'stage {k}'):
             start_time = time.time()

@@ -13,6 +13,7 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
                          fb_params and actor_params, e.g. the pretrained one), evaluates ALL the benchmark tasks of the env zero-shot (latent from fresh labels,
                          num_evals episodes each) and the stored latents of the stream tasks (tracked), writes eval_log.csv (tag eval_only) and exits.
                          The log folder is logs/<time>_FBeval-<env>-<tasks>; info.txt holds the source checkpoint. tasks= should be the stream the checkpoint was trained on.
+    model_dir=<path>  where the stage checkpoints are written (default models/<run folder>); a fixed path lets a later command of the same job evaluate it
     bench=all         final: (walker) the benchmark list is the task list of the study: stand run flip supine jump_any kick_l split flamingo_r
     eval_z=fresh      random: (eval-only control) the latent of every episode is a random vector on the sphere instead of the one inferred from fresh labels
     eval_labels=a,b   the fresh evaluation covers only these benchmark tasks (eval-only mode: the new walker tasks without re-evaluating the built-ins)
@@ -299,8 +300,8 @@ if __name__ == '__main__':
         except FileExistsError:
             suffix += 1
 
-    MODEL_SAVE_FOLDER = f"./models/{name}"
-    os.makedirs(MODEL_SAVE_FOLDER)
+    MODEL_SAVE_FOLDER = str(kwargs['model_dir']) if 'model_dir' in kwargs else f"./models/{name}"
+    os.makedirs(MODEL_SAVE_FOLDER, exist_ok=True)
     print('LOGS_FOLDER      :', LOGS_FOLDER)
     print('MODEL_SAVE_FOLDER:', MODEL_SAVE_FOLDER)
 

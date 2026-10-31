@@ -242,11 +242,52 @@ def lrec_class(cmd):
         return v, 1, R1A + '|' + R1B, 'baseline|baseline', False
     return v, 2 + len(name), R1A if name in single else R1B, name, False
 
+FINAL_TASKS = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+
+
+def is_final(cmd):
+    """Experiments of the final task list (tools/queue_final.py): B-only learnability, TD3 on the true reward, fine-tuning with bench=final, evaluations."""
+    return ('tools/b_only_fit.py' in cmd or flag(cmd, 'bench') == 'final'
+            or ('offline_rl_approx.py' in cmd and flag(cmd, 'reward_approx') in (None, 'true') and flag(cmd, 'task') in FINAL_TASKS))
+
+
+def final_kind(cmd):
+    if 'tools/b_only_fit.py' in cmd: return 'bonly'
+    if 'offline_rl_approx.py' in cmd: return 'td3'
+    if flag(cmd, 'eval_ckpt'): return 'eval'
+    return 'ft'
+
+
+def final_text(cmd):
+    k, t = final_kind(cmd), (flag(cmd, 'task') or flag(cmd, 'tasks') or '')
+    if k == 'bonly':
+        return ('B-only learnability of the 8 tasks',
+                'B alone is fitted from the pretrained B on the reward of each of the 8 tasks (fixed readout, 30k steps, 10k and 100k labelled states) and the held-out reward error is measured before and after. Nothing else is trained.')
+    if k == 'td3':
+        return ('TD3 upper bound: %s' % t, 'Offline TD3 from scratch on the TRUE reward of %s (no FB model, no latent), 1M updates, evaluated on the same reward: what a single-task policy reaches on this dataset.' % t)
+    if k == 'eval':
+        src = flag(cmd, 'eval_ckpt')
+        who = 'the pretrained model' if 'FBpretrain' in src else ('the model fine-tuned on %s' % t if 'final8' in src else 'the run model (array 1788307)')
+        return ('Evaluation on the 8 tasks: %s' % who, 'No training. Zero-shot return of %s on each of the 8 tasks (latent inferred from 10k labelled states, 20 episodes).' % who)
+    return ('Fine-tune on %s (best setup)' % t,
+            'The best setup so far (lam 100, focus 0.5, noise 0.2, actor focus 1.0; 500k updates, 100k labelled states, no retention terms) trained on %s alone. The return on %s is evaluated every 10k updates; a final evaluation on all 8 tasks follows.' % (t, t))
+
+
+def final_class(cmd):
+    k, t = final_kind(cmd), (flag(cmd, 'task') or flag(cmd, 'tasks') or '')
+    v = {'bonly': 'B-only learnability', 'td3': 'TD3 upper bound, %s' % t, 'ft': 'Fine-tuned on %s' % t,
+         'eval': 'Evaluation, ' + ('pretrained model' if 'FBpretrain' in (flag(cmd, 'eval_ckpt') or '') else 'model of %s' % t)}[k]
+    order = {'bonly': 0, 'td3': 10, 'ft': 30, 'eval': 60}[k] + (FINAL_TASKS.index(t) if t in FINAL_TASKS else 0)
+    return 'final-tasks', v, order, '', v, False
+
+
 def describe(j):
     cmd, st = j['command'] or '', j['status']
     arr = j['arrayJob'] or j['jobId']
     tail = ''
-    if 'fb_continual_temp.py' in cmd:
+    if is_final(cmd):
+        title, desc = final_text(cmd)
+    elif 'fb_continual_temp.py' in cmd:
         v = ret_variant(cmd) if is_ret(cmd) else (fb_variant(cmd) if is_fb(cmd) else (free_variant(cmd) if is_free(cmd) else lrec_round1(cmd)))
         title = ('Return with task focus: %s' if is_ret(cmd) else 'L_rec vs E3 phase 1: %s') % v
         desc = ('Which differences between L_rec (continual) and fit_backward_to_reward (E3 phase 1) make B regress onto the reward as well? '
@@ -337,12 +378,15 @@ FAMILIES = {
                     "Can L_rec, the reward term of the continual method, fit the reward in B as well as the E3 reference (fit_backward_to_reward) while L_FB and the orthonormality term stay active? Walker run, one stage."),
     'task-design': ('Reward design: tasks that are not aligned with the built-in ones', -1,
                     'Which new walker rewards are uncorrelated with stand, walk, vel8, run and flip, and with each other? 54 rewards (48 new, 6 from the first study) defined on the observation, evaluated on 100k dataset states, no training of anything.'),
+    'final-tasks': ('Task list: learnability, upper bound, fine-tuning', 0.2,
+                    'For the selected task list (stand, run, flip, supine, jump_any, kick_l, split, flamingo_r): can B encode each task, what does TD3 reach on the true reward, and what happens to the other tasks when the best setup is fine-tuned on one of them?'),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
 }
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 SETUP = {
+    'final-tasks': 'B-only learnability: B alone is fitted from the pretrained B on each task (fixed readout, 30k steps) and the held-out reward error is measured. TD3 upper bound: offline TD3 from scratch on the true reward of each task, 1M updates, one run. Fine-tuning: the best setup of the return study (lam 100, focus 0.5, noise 0.2, actor focus 1.0; 500k updates, 100k labelled states, no retention terms) trained on one task at a time, the return on that task evaluated during training, then every model evaluated zero-shot on all 8 tasks (latent inferred from 10k labelled states, 20 episodes). Experiments are submitted automatically from a local queue (tools/queue.py).',
     'return-focus': 'All fine-tuned models start from the same pretrained FB model (the "pretrained model" row of the tables). Each is trained for 500k updates on one task, run, with 100k labelled states of run: B, F and the actor are all updated (the FB objective, the orthonormality term, and the reward term L_rec that regresses the reward of run on B). In addition the latent of run is mixed into the latents used to train F and the actor (focus). The retention terms are off: there is only one task. Evaluation: zero-shot return, the latent being inferred from 10k labelled states of the task, 20 episodes of 1000 steps.',
     'lrec-vs-fit': 'One stage on the task run, from the pretrained walker model. The reference (dashed, "E3 phase 1") is B alone regressed on the reward with a fixed readout for 30k steps. L_rec is the reward term of the continual method that does the same regression inside the joint training with L_FB and the orthonormality term. eps is the reward reconstruction error on held-out states (lower is better; 1 means nothing is explained). In the run names: lam = weight of L_rec, ortho = coefficient of the orthonormality term, prefit = a B-only fit before the joint training, resolved readout = the readout is re-solved from B at every step (the current method; otherwise fixed), labels = labelled states (10k unless stated).',
     'frozen-b': 'Pretrained walker FB model, B and the task latent frozen; only F and the actor are trained, for 500k updates on the task run, with every training latent equal to the latent of run plus angular noise (spread: 0 = exactly the latent, 0.2 = a small cone around it). Return = zero-shot return on run, 20 episodes. 3 runs per setting.',
@@ -442,6 +486,8 @@ def classify(j):
     """(family, variant, order, panel, series): jobs with the same family and variant are repeats of one configuration.
     On the Results tab a panel is one chart and a series is one line of it (same series name = same color across panels)."""
     cmd = j['command'] or ''
+    if is_final(cmd):
+        return final_class(cmd)
     if 'fb_continual_temp.py' in cmd:
         v, order, panel, series, ref = lrec_class(cmd)
         return ('return-focus' if is_ret(cmd) else 'lrec-vs-fit'), v, order, panel, series, ref

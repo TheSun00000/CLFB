@@ -59,5 +59,12 @@ Flags are `key=value` (no dashes). Required: `env_name`, `checkpoint`, `tasks`. 
 - A job whose script runs several python commands in a row (`python a; python b; ...`) is split by `tools/hpc_status.py` into one child entry per command, with id `<jobId>.<i>` (i from 0, matched to the run folders in order). Tracking docs are written for the children, not for the parent (`tools/describe_jobs.py` skips it).
 - New jobs are untracked by default. When the user says a job is an experiment, add its `tracking/<jobId>` doc (and for an array, every task of it): `tools/describe_jobs.py` writes title, description, family and variant from the command (add a branch there for a new kind of experiment), then push the files it writes under `hpc/status/tracking/` with an ArtifactData batch (50 writes at most per batch; `if_version` is required for documents that already exist).
 
+## Queue of experiments (what to sbatch, and when)
+- The dev QoS allows at most 10 submitted jobs per user, running plus pending, every array task counting as one (`sacctmgr` MaxSubmitPU = 10). More experiments than that wait in a local queue and are sent as slots free up. No need to group experiments in arrays: one job can run one command or several in a row.
+- `queue/experiments.json` (local, git-ignored) lists the experiments in submission order; each has a script `scripts/queue/<name>.sh` (tracked, pushed, because the cluster pulls it). `tools/queue.py add|status|submit|sync|requeue` (see its docstring); `tools/queue_final.py` fills it with the experiments of the final task list.
+- The user has authorized automatic submission: whenever Claude touches the cluster (a tracker refresh, a status check, a new message about experiments), run `python tools/queue.py submit` (it syncs states, counts the jobs in `squeue`, pulls the repo on the cluster, submits the queued entries that fit). It refuses to run with unpushed or uncommitted scripts: commit and push first. Never cancel or delete anything on the cluster.
+- After new jobs start, add their tracker entries (`tools/describe_jobs.py` classifies the final-list experiments in the family `final-tasks`).
+- Never run anything that evaluates or trains B(s) on the local machine; it goes to the cluster.
+
 ## Updating the shared context
 At the end of a session: append to `docs/journal.md`, record any decision in `docs/decisions.md`, and add an Updates entry to the tracker. When runs finish, add Experiments rows to the tracker with the run folder name.

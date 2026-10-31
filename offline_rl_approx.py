@@ -233,6 +233,33 @@ if __name__ == '__main__':
             move_reward = tolerance(aux[..., 0], float(param), INF, param / 2, 'linear', 0.5)
         return stand_reward * (5 * move_reward + 1) / 6
 
+    # Walker, extra tasks defined on the 24-d OBSERVATION, which the walker carries in aux[..., 4:28] (same definitions as fb_continual_temp.py,
+    # see tools/reward_library.py): obs[0:14] = (cos, sin) of the absolute angle of 7 bodies (torso, r.thigh, r.leg, r.foot, l.thigh, l.leg, l.foot),
+    # obs[14] = torso height, obs[15:24] = velocities (z, x, torso angular, then the 6 joint velocities).
+    def _body_angle(o, i):
+        return jnp.arctan2(o[..., 2 * i + 1], o[..., 2 * i])
+
+    def _wrap(a):
+        return (a + math.pi) % (2 * math.pi) - math.pi
+
+    def walker_new_reward(aux, param):
+        o = aux[..., 4:28]
+        d = math.pi / 180
+        if param == 'kick_l':         # left hip velocity >= 20 rad/s
+            return tolerance(o[..., 21], 20.0, INF, 20.0)
+        if param == 'jump_any':       # upward velocity >= 3, any posture
+            return tolerance(o[..., 15], 3.0, INF, 3.0)
+        if param == 'supine':         # torso lying horizontal on one side (sin of the torso angle <= -0.8)
+            return tolerance(-o[..., 1], 0.8, INF, 0.4)
+        if param == 'split':          # thighs >= 60 deg apart
+            return tolerance(jnp.abs(_wrap(_body_angle(o, 1) - _body_angle(o, 4))), 60 * d, INF, 40 * d)
+        if param == 'flamingo_r':     # right foot >= 0.35 above the ground, left foot on the ground (hip 0.3, thigh 0.45, leg 0.5)
+            hip_y = o[..., 14] - 0.3 * o[..., 0]
+            ank_r = hip_y - 0.45 * o[..., 2] - 0.5 * o[..., 4]
+            ank_l = hip_y - 0.45 * o[..., 8] - 0.5 * o[..., 10]
+            return tolerance(ank_r, 0.35, INF, 0.25) * tolerance(ank_l, -INF, 0.12, 0.12)
+        raise NotImplementedError(param)
+
     # Quadruped: aux = [torso_velocity(3), torso_upright, com_height]
     def _quadruped_upright(aux):
         deviation = math.cos(math.radians(0))
@@ -379,13 +406,19 @@ if __name__ == '__main__':
             aux = np.concatenate((
                 np.load(f'{DATASET_FOLDER}/aux_walker.npy').reshape(10000, 1000, 3),
                 np.load(f'{DATASET_FOLDER}/angmomentum_aux_walker.npy').reshape(10000, 1000, 1),
-            ), axis=-1)
+                np.asarray(dataset['observations']).reshape(10000, 1000, 24),          # aux[..., 4:28] = the observation
+            ), axis=-1).astype(np.float32)
             benchmarks = [
                 (walker_reward, 'stand',  0),
                 (walker_reward, 'walk',   2),
                 (walker_reward, 'vel8',   8),
                 (walker_reward, 'run',   10),
                 (walker_reward, 'flip', 'flip'),
+                (walker_new_reward, 'supine',     'supine'),
+                (walker_new_reward, 'jump_any',   'jump_any'),
+                (walker_new_reward, 'kick_l',     'kick_l'),
+                (walker_new_reward, 'split',      'split'),
+                (walker_new_reward, 'flamingo_r', 'flamingo_r'),
             ]
 
         elif ENV_NAME == 'quadruped':
@@ -424,8 +457,8 @@ if __name__ == '__main__':
         def env_aux(e, state):
             physics = e.physics
             if ENV_NAME == 'walker':
-                return np.array([physics.horizontal_velocity(), physics.torso_upright(), physics.torso_height(),
-                                 physics.named.data.subtree_angmom['torso'][1]])
+                return np.concatenate([[physics.horizontal_velocity(), physics.torso_upright(), physics.torso_height(),
+                                        physics.named.data.subtree_angmom['torso'][1]], np.asarray(state, dtype=np.float64)])
             if ENV_NAME == 'cheetah':
                 return np.array([physics.speed(), physics.named.data.subtree_angmom['torso'][1]])
             com_height = physics.named.data.sensordata['center_of_mass'].copy()[2]   # quadruped
@@ -581,7 +614,7 @@ if __name__ == '__main__':
           f'min={dataset_rewards.min():.4f} max={dataset_rewards.max():.4f} '
           f'frac_nonzero={(dataset_rewards != 0).mean():.4f}')
 
-    NUM_EVALS = 5
+    NUM_EVALS = int(kwargs['num_evals']) if 'num_evals' in kwargs else 5      # episodes per evaluation
     print(NUM_TRAJECTORIES, TRAJECTORY_LEN, NUM_TRAJECTORIES * TRAJECTORY_LEN)
 
     BATCH_SIZE      = 1024

@@ -65,7 +65,7 @@ def status_of(state):
 
 
 def list_jobs(since):
-    out = ssh('cd "%s" || exit 1\necho @@SCRIPTS; ls scripts\necho @@SACCT\n'
+    out = ssh('cd "%s" || exit 1\necho @@SCRIPTS; (ls scripts; ls scripts/queue) 2>/dev/null\necho @@SACCT\n'
               'sacct -u "$USER" -S %s -X -n -P --format=%s\n'
               'echo @@SQUEUE; squeue -h -u "$USER" -t PENDING -o "%%i|%%R"\n' % (REMOTE_DIR, since, SACCT_FIELDS))
     scripts, jobs, mode, reasons = set(), {}, None, {}

@@ -11,3 +11,5 @@ baselines
 csv_files
 diag_resultshpc
 hpc
+# local queue of experiments to sbatch (tools/queue.py); the scripts in scripts/queue/ are tracked
+queue/

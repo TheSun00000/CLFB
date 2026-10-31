@@ -38,7 +38,7 @@ Flags:
     env_name=      cheetah | walker | quadruped | antmaze | pointmaze           (required)
     checkpoint=    path of the pretrained FB pickle                              (required)
     tasks=         ordered list of eval-task labels of the env (>= 1, unique): the continual stream.
-                   labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip
+                   labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip + (fb_continual_temp.py only) spin_back kick_r lean_a jump knees_bent split
                            quadruped: stand walk run jump | pointmaze: goal_0_20 goal_20_20 goal_20_0 goal_4_4 goal_12_12
                            antmaze: goal_bottom ... (see `benchmarks` below)
     seed=<int>               default: random (logged in info.txt)
@@ -361,6 +361,34 @@ if __name__ == '__main__':
             move_reward = tolerance(aux[..., 0], float(param), INF, param / 2, 'linear', 0.5)
         return stand_reward * (5 * move_reward + 1) / 6
 
+    # Walker, extra tasks defined on the 24-d OBSERVATION, which the walker carries in aux[..., 4:28]
+    #   obs[0:14] = (cos, sin) of the absolute angle of 7 bodies (torso, r.thigh, r.leg, r.foot, l.thigh, l.leg, l.foot), obs[14] = torso height,
+    #   obs[15:24] = velocities (z, x, torso angular, then the 6 joint velocities). None of them is a function of the 4 physics quantities
+    #   (velocity, uprightness, height, angular momentum) the built-in tasks use; see tools/task_design.py for the study that picked them.
+    def _body_angle(o, i):
+        return jnp.arctan2(o[..., 2 * i + 1], o[..., 2 * i])
+
+    def _wrap(a):
+        return (a + math.pi) % (2 * math.pi) - math.pi
+
+    def walker_new_reward(aux, param):
+        o = aux[..., 4:28]
+        d = math.pi / 180
+        if param == 'spin_back':      # torso angular velocity <= -8 rad/s (backward rotation)
+            return tolerance(-o[..., 17], 8.0, INF, 8.0)
+        if param == 'kick_r':         # right hip velocity >= 20 rad/s
+            return tolerance(o[..., 18], 20.0, INF, 20.0)
+        if param == 'lean_a':         # torso tilted by 25..50 deg to one side
+            return tolerance(-_body_angle(o, 0), 25 * d, 50 * d, 25 * d)
+        if param == 'jump':           # upward velocity >= 3, not lying down
+            return tolerance(o[..., 15], 3.0, INF, 3.0) * (1 + o[..., 0]) / 2
+        if param == 'knees_bent':     # both knees bent >= 60 deg
+            return (tolerance(jnp.abs(_wrap(_body_angle(o, 2) - _body_angle(o, 1))), 60 * d, INF, 40 * d)
+                    * tolerance(jnp.abs(_wrap(_body_angle(o, 5) - _body_angle(o, 4))), 60 * d, INF, 40 * d))
+        if param == 'split':          # legs apart: |angle(r.thigh) - angle(l.thigh)| >= 60 deg
+            return tolerance(jnp.abs(_wrap(_body_angle(o, 1) - _body_angle(o, 4))), 60 * d, INF, 40 * d)
+        raise NotImplementedError(param)
+
     # Quadruped: aux = [torso_velocity(3), torso_upright, com_height]
     def _quadruped_upright(aux):
         deviation = math.cos(math.radians(0))
@@ -490,13 +518,20 @@ if __name__ == '__main__':
             aux = np.concatenate((
                 np.load(f'{DATASET_FOLDER}/aux_walker.npy').reshape(10000, 1000, 3),
                 np.load(f'{DATASET_FOLDER}/angmomentum_aux_walker.npy').reshape(10000, 1000, 1),
-            ), axis=-1)
+                np.asarray(dataset['observations']).reshape(10000, 1000, 24),          # aux[..., 4:28] = the observation
+            ), axis=-1).astype(np.float32)
             benchmarks = [
                 (walker_reward, 'stand',  0),
                 (walker_reward, 'walk',   2),
                 (walker_reward, 'vel8',   8),
                 (walker_reward, 'run',   10),
                 (walker_reward, 'flip', 'flip'),
+                (walker_new_reward, 'spin_back',  'spin_back'),
+                (walker_new_reward, 'kick_r',     'kick_r'),
+                (walker_new_reward, 'lean_a',     'lean_a'),
+                (walker_new_reward, 'jump',       'jump'),
+                (walker_new_reward, 'knees_bent', 'knees_bent'),
+                (walker_new_reward, 'split',      'split'),
             ]
 
         elif ENV_NAME == 'quadruped':
@@ -535,8 +570,8 @@ if __name__ == '__main__':
         def env_aux(e, state):
             physics = e.physics
             if ENV_NAME == 'walker':
-                return np.array([physics.horizontal_velocity(), physics.torso_upright(), physics.torso_height(),
-                                 physics.named.data.subtree_angmom['torso'][1]])
+                return np.concatenate([[physics.horizontal_velocity(), physics.torso_upright(), physics.torso_height(),
+                                        physics.named.data.subtree_angmom['torso'][1]], np.asarray(state, dtype=np.float64)])
             if ENV_NAME == 'cheetah':
                 return np.array([physics.speed(), physics.named.data.subtree_angmom['torso'][1]])
             com_height = physics.named.data.sensordata['center_of_mass'].copy()[2]   # quadruped

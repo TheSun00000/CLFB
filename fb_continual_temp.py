@@ -6,6 +6,9 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
                          of the stage) instead of re-solving w = sg(Sigma_theta^-1 z_hat) at every step. Loss = mean((rbar - B w_fit)^2).
     rec_bs=0          >0: L_rec on a random minibatch of D_k of this size at every step (0 = the whole labeled set, as before).
     lr_coef=1.0       lr of B = lr_coef * lr (already in the config, now a flag). E3 phase 1 uses 3e-4 = 3 * lr.
+    rec_prefit=0      1 (continual mode): at the start of the stage, run fit_backward_to_reward (B alone, fixed readout, rfit_* flags) before the
+                         joint training; an evaluation tagged 'prefit' is logged at step 0 afterwards. Tests whether the joint objective keeps the fit.
+    eval_rollouts=1   0: no rollouts in the evaluations (returns are NaN), only the reward-reconstruction columns: much faster evals.
     b_cosine=0        1: cosine decay of the lr of B over steps_per_stage (Adam is re-initialised at every stage). E3 phase 1 does this.
   Existing flags that also matter for this question: lam, n_est, n_labeled, cross_fit, and fb_objective=0 ortho_coef=0
   (then B receives gradient from L_rec only: the Q loss uses a stop-gradient B).
@@ -241,6 +244,8 @@ if __name__ == '__main__':
     EVAL_BASELINE   = bool(int(kwargs['eval_baseline'])) if 'eval_baseline' in kwargs else True
     EVAL_N          = 10_000      # number of states for the eval-time reward / reconstruction statistics
     EVAL_FRESH      = bool(int(kwargs['eval_fresh'])) if 'eval_fresh' in kwargs else True
+    EVAL_ROLLOUTS   = bool(int(kwargs['eval_rollouts'])) if 'eval_rollouts' in kwargs else True
+    REC_PREFIT      = bool(int(kwargs['rec_prefit'])) if 'rec_prefit' in kwargs else False
 
     # ── Single-task fine-tuning ───────────────────────────────────────────────────
     FINETUNE   = str(kwargs['finetune']) if 'finetune' in kwargs else 'none'
@@ -1533,7 +1538,10 @@ if __name__ == '__main__':
             stats[('ft', 0)] = ft_reward_quality(backward_params, ft_b, ft_w, ft_m2)
             items.append((('ft', 0), ft_b, jnp.tile(ft_z[None, :], (NUM_EVALS, 1))))
 
-        returns = rollout_returns(ts.actor_params, items)
+        if EVAL_ROLLOUTS:
+            returns = rollout_returns(ts.actor_params, items)
+        else:
+            returns = {item[0]: (float('nan'), float('nan')) for item in items}
 
         row = {'stage': stage, 'step': step, 'tag': tag}
         if fit is not None:     # continual mode: quality of B^T w_fit (fixed readout of the stage), same quantity as [reward fit]
@@ -1637,6 +1645,9 @@ if __name__ == '__main__':
 
         ft_info = None
         fit_info = (task_idx, task, stage_data.w_fit, m2_k) if FINETUNE == 'none' else None   # fixed-readout quality of B on this task
+        if FINETUNE == 'none' and REC_PREFIT:
+            train_state = fit_backward_to_reward(train_state, stage_data, task_idx, m2_k)
+            run_eval(train_state, k, 0, 'prefit', [], [], None, fit_info)
         if FINETUNE != 'none':
             if FINETUNE == 'reward_critic':
                 train_state = fit_backward_to_reward(train_state, stage_data, task_idx, m2_k)

@@ -455,45 +455,62 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     return { steps: base, mean: mean, sd: sd, n: runs.length };
   }
 
-  function drawChart(title, series) {
+  function drawChart(title, series, opts) {
+    opts = opts || {};
+    var FMT = opts.fmt || function (v) { return v.toFixed(1); }, FMT0 = opts.fmt || function (v) { return v.toFixed(0); };
     var W = 520, H = 280, L = 44, R = 50, T = 12, B = 34, pw = W - L - R, ph = H - T - B;
     var xmax = 0, lo = Infinity, hi = -Infinity;
-    series.forEach(function (s) {
-      var a = s.agg; xmax = Math.max(xmax, a.steps[a.steps.length - 1]);
-      a.mean.forEach(function (v, i) { var d = a.sd[i] != null ? a.sd[i] : 0; lo = Math.min(lo, v - d); hi = Math.max(hi, v + d); });
+    series.forEach(function (s) { if (!s.ref) xmax = Math.max(xmax, s.agg.steps[s.agg.steps.length - 1]); });
+    series.forEach(function (s) {      // a reference is a horizontal dashed line at its last value, over the whole axis
+      if (s.ref) { var rv = s.agg.mean[s.agg.mean.length - 1]; s.agg = { steps: [0, xmax || 1], mean: [rv, rv], sd: [null, null], n: 1 }; }
+      var a = s.agg;
+      a.mean.forEach(function (v, i) { var d = a.sd[i] != null && !opts.log ? a.sd[i] : 0; lo = Math.min(lo, v - d); hi = Math.max(hi, v + d); });
     });
-    var ystep = niceStep((hi - lo) || 1, 5), y0 = Math.floor(lo / ystep) * ystep, y1 = Math.ceil(hi / ystep) * ystep;
-    var xstep = niceStep(xmax, 5);
+    var ystep, y0, y1, yticks = [], xstep = niceStep(xmax || 1, 5);
+    if (opts.log) {
+      lo = Math.max(lo, 1e-6);
+      y0 = Math.pow(10, Math.floor(Math.log10(lo))); y1 = Math.pow(10, Math.ceil(Math.log10(hi)));
+      if (y1 <= y0) y1 = y0 * 10;
+      for (var k = Math.round(Math.log10(y0)); Math.pow(10, k) <= y1 * 1.001; k++) [1, 3].forEach(function (m) {
+        var tv = m * Math.pow(10, k); if (tv >= y0 * 0.999 && tv <= y1 * 1.001) yticks.push(tv);
+      });
+    } else {
+      ystep = niceStep((hi - lo) || 1, 5); y0 = Math.floor(lo / ystep) * ystep; y1 = Math.ceil(hi / ystep) * ystep;
+      for (var q = 0, nq = Math.round((y1 - y0) / ystep); q <= nq; q++) yticks.push(y0 + q * ystep);
+    }
     function X(v) { return L + (v / xmax) * pw; }
-    function Y(v) { return T + ph - ((v - y0) / (y1 - y0)) * ph; }
+    function Y(v) {
+      if (opts.log) return T + ph - (Math.log(Math.max(v, y0 * 0.05) / y0) / Math.log(y1 / y0)) * ph;
+      return T + ph - ((v - y0) / (y1 - y0)) * ph;
+    }
     var svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", tabindex: "0", "class": "chart",
                           "aria-label": title + ": return versus training steps for " + series.map(function (s) { return s.name; }).join(", ") });
-    var ny = Math.round((y1 - y0) / ystep), i;
-    for (i = 0; i <= ny; i++) {
-      var yv = y0 + i * ystep;
+    var i;
+    yticks.forEach(function (yv) {
       svg.appendChild(sv("line", { x1: L, x2: W - R, y1: Y(yv), y2: Y(yv), "class": "grid" }));
-      svg.appendChild(sv("text", { x: L - 8, y: Y(yv) + 4, "text-anchor": "end", "class": "tick" }, String(Math.round(yv))));
-    }
+      svg.appendChild(sv("text", { x: L - 8, y: Y(yv) + 4, "text-anchor": "end", "class": "tick" }, opts.log ? String(Number(yv.toPrecision(1))) : String(Math.round(yv))));
+    });
     var nx = Math.floor(xmax / xstep + 1e-9);
     for (i = 0; i <= nx; i++) svg.appendChild(sv("text", { x: X(i * xstep), y: H - B + 18, "text-anchor": "middle", "class": "tick" }, fmtStep(i * xstep)));
     svg.appendChild(sv("text", { x: W - R, y: H - 4, "text-anchor": "end", "class": "tick" }, "training steps"));
     series.forEach(function (s) {
       var a = s.agg;
-      if (a.n > 1) {
+      if (a.n > 1 && !opts.log) {
         var up = a.steps.map(function (st, k) { return X(st) + "," + Y(a.mean[k] + a.sd[k]); });
         var dn = a.steps.map(function (st, k) { return X(st) + "," + Y(a.mean[k] - a.sd[k]); }).reverse();
         svg.appendChild(sv("polygon", { points: up.concat(dn).join(" "), style: "fill:" + s.color + ";fill-opacity:0.1" }));
       }
       svg.appendChild(sv("polyline", { points: a.steps.map(function (st, k) { return X(st) + "," + Y(a.mean[k]); }).join(" "),
-        style: "fill:none;stroke:" + s.color + ";stroke-width:2;stroke-linejoin:round;stroke-linecap:round" }));
+        style: "fill:none;stroke:" + s.color + ";stroke-width:2;stroke-linejoin:round;stroke-linecap:round" + (s.ref ? ";stroke-dasharray:6 4" : "") }));
     });
     var placed = [];
     series.forEach(function (s) {
+      if (s.ref) return;
       var a = s.agg, last = a.steps.length - 1, cx = X(a.steps[last]), cy = Y(a.mean[last]);
       svg.appendChild(sv("circle", { cx: cx, cy: cy, r: 4, style: "fill:" + s.color + ";stroke:var(--surface);stroke-width:2" }));
       if (series.length <= 4 && placed.every(function (p) { return Math.abs(p - cy) >= 12; })) {
         placed.push(cy);
-        svg.appendChild(sv("text", { x: cx + 9, y: cy + 4, "class": "endval" }, a.mean[last].toFixed(0)));
+        svg.appendChild(sv("text", { x: cx + 9, y: cy + 4, "class": "endval" }, FMT0(a.mean[last])));
       }
     });
     var cross = sv("g", { visibility: "hidden" }), vline = sv("line", { y1: T, y2: T + ph, "class": "vline" });
@@ -525,7 +542,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
         dots[j].setAttribute("visibility", "visible"); dots[j].setAttribute("cx", px); dots[j].setAttribute("cy", Y(s.agg.mean[idx]));
         var row = el("div", "row"), key = el("span", "lk"), nm = el("span", "nm", s.name);
         key.style.background = s.color;
-        var val = el("b", null, s.agg.mean[idx].toFixed(1) + (s.agg.n > 1 ? " ± " + s.agg.sd[idx].toFixed(1) : ""));
+        var val = el("b", null, FMT(s.agg.mean[idx]) + (s.agg.n > 1 ? " ± " + FMT(s.agg.sd[idx]) : ""));
         row.appendChild(key); row.appendChild(nm); row.appendChild(val); tip.appendChild(row);
       });
       tip.hidden = false;
@@ -560,29 +577,50 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     return box;
   }
 
-  function renderCharts(famJobs) {
+  var PLOTS = {
+    "return": { title: "Return", get: function (c) { return c.steps ? c : null; }, fmt: null, log: false },
+    eps: { title: "Reward reconstruction error on held-out states (eps, log scale)", get: function (c) { return c.eps ? { steps: c.eps.steps, mean: c.eps.v } : null; },
+           fmt: function (v) { return v.toFixed(3); }, log: true },
+    orth: { title: "Orthonormality error of B during training (orth_l2)", get: function (c) { return c.orth ? { steps: c.orth.steps, mean: c.orth.v } : null; },
+            fmt: function (v) { return v.toFixed(2); }, log: false }
+  };
+  function panelsOf(j) { return String(j.panel || "").split("|"); }
+  function renderCharts(famJobs, info) {
     if (!loaded.curves) return null;
-    var withCurve = famJobs.filter(function (j) { return data.curves[j.jobId]; });
-    if (!withCurve.length) return null;
-    function minOrder(list, key) {
-      var o = {};
-      list.forEach(function (j) { var k = j[key]; if (o[k] == null || j.order < o[k]) o[k] = j.order; });
-      return Object.keys(o).sort(function (a, b) { return o[a] - o[b]; });
-    }
-    var names = minOrder(withCurve, "series").slice(0, 5), panels = minOrder(withCurve, "panel");
-    var grid = el("div", "charts");
-    panels.forEach(function (pn) {
-      var series = [];
-      names.forEach(function (nm, idx) {
-        var runs = withCurve.filter(function (j) { return j.panel === pn && j.series === nm; }).map(function (j) { return data.curves[j.jobId]; });
-        if (runs.length) series.push({ name: nm, color: "var(--s" + (idx + 1) + ")", agg: aggregate(runs) });
+    var keys = (info && info.plots) || ["return"], wrap = el("div"), any = false;
+    keys.forEach(function (pk) {
+      var m = PLOTS[pk]; if (!m) return;
+      var list = famJobs.filter(function (j) { return data.curves[j.jobId] && m.get(data.curves[j.jobId]); });
+      if (!list.length) return;
+      var firstOrder = {};
+      list.forEach(function (j) { panelsOf(j).forEach(function (pn) { if (firstOrder[pn] == null || j.order < firstOrder[pn]) firstOrder[pn] = j.order; }); });
+      var panels = Object.keys(firstOrder).sort(function (a, b) { return firstOrder[a] - firstOrder[b]; });
+      var grid = el("div", "charts");
+      panels.forEach(function (pn) {
+        var inP = list.filter(function (j) { return panelsOf(j).indexOf(pn) >= 0; });
+        var ord = {};
+        inP.forEach(function (j) { if (!j.ref && (ord[j.series] == null || j.order < ord[j.series])) ord[j.series] = j.order; });
+        var names = Object.keys(ord).sort(function (a, b) { return ord[a] - ord[b]; }).slice(0, 5), series = [];
+        function runsOf(nm, ref) { return inP.filter(function (j) { return !!j.ref === ref && j.series === nm; }).map(function (j) { return m.get(data.curves[j.jobId]); }); }
+        names.forEach(function (nm, idx) {
+          var runs = runsOf(nm, false);
+          if (runs.length) series.push({ name: nm, color: "var(--s" + (idx + 1) + ")", agg: aggregate(runs) });
+        });
+        var refs = {};
+        inP.forEach(function (j) { if (j.ref) refs[j.series] = 1; });
+        Object.keys(refs).forEach(function (nm) {
+          var runs = runsOf(nm, true);
+          if (runs.length && series.length) series.push({ name: nm, color: "var(--muted)", ref: true, agg: aggregate(runs) });
+        });
+        if (series.length) grid.appendChild(drawChart(pn, series, { log: m.log, fmt: m.fmt }));
       });
-      if (series.length) grid.appendChild(drawChart(pn, series));
+      if (!grid.firstChild) return;
+      any = true;
+      if (keys.length > 1) wrap.appendChild(el("h4", "chart-title", m.title));
+      wrap.appendChild(grid);
     });
-    if (!grid.firstChild) return null;
-    var wrap = el("div");
-    wrap.appendChild(grid);
-    wrap.appendChild(el("p", "chartnote", "Lines are the mean return over runs of one configuration; a shaded band (± std across runs) appears only when a configuration has several runs. Hover or use the arrow keys for values."));
+    if (!any) return null;
+    wrap.appendChild(el("p", "chartnote", "Lines are the mean over runs of one configuration; a shaded band (± std across runs) appears only when a linear-axis configuration has several runs. A dashed grey line is a reference. Hover or use the arrow keys for values."));
     return wrap;
   }
 
@@ -590,7 +628,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
     var out = $("resOut"); clear(out);
     var jobs = data.jobs.map(function (j) {
       var t = data.tracking[tkey(j.jobId)] || {};
-      return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0, panel: t.panel || "", series: t.series || t.variant || "" });
+      return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0, panel: t.panel || "", series: t.series || t.variant || "", ref: !!t.ref });
     }).filter(function (j) { return j.tracked && j.status === "finished" && j.results && j.family; });
     if (!jobs.length) {
       out.appendChild(empty(loaded.jobs ? "No finished results yet" : "Loading", loaded.jobs ? "Finished tracked runs with an evaluation log appear here, grouped by family." : ""));
@@ -605,11 +643,28 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
       var groups = {};
       fams[fk].forEach(function (j) { (groups[j.variant] = groups[j.variant] || { order: j.order, jobs: [] }).jobs.push(j); });
       var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
-      ["Configuration", "Runs", "Final return", "Best during run", "Start", "Jobs"].forEach(function (h) { hr.appendChild(el("th", null, h)); });
+      var epsTable = info.table === "eps";
+      (epsTable ? ["Configuration", "Runs", "eps (fresh readout)", "eps (fixed readout)", "orth_l2", "Start eps", "Jobs"]
+                : ["Configuration", "Runs", "Final return", "Best during run", "Start", "Jobs"]).forEach(function (h) { hr.appendChild(el("th", null, h)); });
       var th = el("thead"); th.appendChild(hr); t.appendChild(th);
       var tb = el("tbody");
       Object.keys(groups).sort(function (a, b) { return groups[a].order - groups[b].order; }).forEach(function (vk) {
         var g = groups[vk].jobs, tr = el("tr");
+        if (epsTable) {
+          function col(key, dec) {
+            var a = g.map(function (j) { return j.results[key]; }).filter(function (v) { return v != null; });
+            return a.length ? stats(a).m.toFixed(dec) : "";
+          }
+          tr.appendChild(el("td", null, vk));
+          tr.appendChild(el("td", "mono", g.length === 1 ? "1 run" : String(g.length)));
+          tr.appendChild(el("td", "pm", col("fresh_eps", 4)));
+          tr.appendChild(el("td", "pm", col("fit_eps", 4)));
+          tr.appendChild(el("td", "pm", col("orth", 2)));
+          tr.appendChild(el("td", "pm", col("start_eps", 4)));
+          tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
+          tb.appendChild(tr);
+          return;
+        }
         var fin = stats(g.map(function (j) { return j.results.final; }));
         var best = stats(g.map(function (j) { return j.results.best; }));
         var starts = g.filter(function (j) { return j.results.start != null; }).map(function (j) { return j.results.start; });
@@ -624,7 +679,7 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
         tb.appendChild(tr);
       });
       t.appendChild(tb); box.appendChild(t); panel.appendChild(box);
-      var charts = renderCharts(fams[fk]);
+      var charts = renderCharts(fams[fk], info);
       if (charts) panel.appendChild(charts);
       out.appendChild(panel);
     });

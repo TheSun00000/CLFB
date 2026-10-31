@@ -21,14 +21,42 @@ Flags:
     scan_length=1000         updates per jitted chunk (= logging granularity)
     n_labeled=10000          size of the labeled set D_k of each task (sampled once per stage, fixed during the stage)
     lam=1.0 mu_b=1.0 mu_q=0.01 alpha=0.5     lambda, mu_B, mu_Q, mixture weight of the atoms in nu
+    z_task_frac=0.0          fraction of the z of the FB loss and of the actor loss replaced by the latent of the CURRENT task
+                             (z_k = mean(rbar_k B) re-encoded at every step with the current B on the stage's labeled set)
+    z_task_spread=0.5        angular noise around that latent (0 = exactly the latent; 1 = 45 degrees)
+    actor_z_task_frac=-1     fraction of the ACTOR loss's z that is the task latent, independent of the FB loss (-1 = same as z_task_frac)
+    freeze_fb=0              1 = diagnostic: F, B (and their Adam state) are not updated, only the actor trains
+    freeze_b=0               1 = diagnostic: B is not updated; F and the actor are still trained
     n_est=4096               number of states of D used at every step to estimate Sigma_theta and A_theta
     n_big=50000              number of states used once per stage for Sigma_old, and at the end of the stage for T_theta
     ridge=1e-5               ridge added to every covariance before inversion
     cross_fit=0              1: L_rec with cross-fitting (z_hat on one half of D_k, loss on the other)
     bc_coef=0.0              TD3+BC weight of the DDPG actor (0 -> plain -Q.mean())
+    FB hyper-parameters, they MUST be the ones of the pretraining run: lr=1e-4 fb_target_tau=0.01 ortho_coef=1.0
+                             q_loss_coef=0.01 mix_ratio=0.5 discount=0.95 target_agg=min|mean (min = original FB)
     eval_chunk=              number of tasks rolled out in parallel (each needs NUM_EVALS env instances)
     eval_each_steps=0        if > 0: also evaluate (fresh zero-shot only) every this many chunks inside a stage
     eval_baseline=1          evaluate the pretrained checkpoint (stage 0) before the first stage
+    eval_fresh=1             0 = skip the fresh zero-shot evaluation of every env task (much faster evals)
+    fb_objective=1           1: critic loss = L_FB + q_loss_coef * Q loss (+ ortho_coef * ortho)
+                             0: critic loss = Q loss only (+ ortho_coef * ortho). L_FB is not computed (branch skipped).
+                             ortho_coef=0 skips the orthonormality loss; lam=0 / mu_b=0 / mu_q=0 skip L_rec / R^B / R^Q.
+
+Single-task fine-tuning (finetune=, default none = the continual method above). In every fine-tuning mode, the z of the
+critic, of the bootstrap and of the actor is the FIXED latent of the task, z_cond = sqrt(d) * normalize(z_k),
+z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, R^Q are NOT computed.
+    finetune=actor          F and B frozen, only the actor is trained (maximize F(s, pi(s, z), z)^T z)
+    finetune=critic         B frozen. F trained with the Q loss only, reward r(s') = B(s')^T w_q with the fixed readout
+                            w_q = Sigma_old^-1 z_cond (Sigma_old on n_big states at the start of the stage). Actor trained.
+    finetune=reward_critic  phase 1 (before the stage's RL steps): B alone is regressed on the labeled set with the readout
+                            FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
+                            warm-started). phase 2: same as finetune=critic with the new B (B frozen).
+        rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    Evaluation: '<task>_ft_{mean,std,rew_corr,eps}' = rollouts with z_cond, and the reconstruction quality of the reward the
+    critic is trained on (B(s)^T w_fit vs rbar, held-out states). An eval tagged 'ft_start' is run before the RL steps.
+    Example:
+        python fb_continual.py env_name=walker checkpoint=... tasks=walk n_labeled=100000 finetune=critic \
+            steps_per_stage=1000000 eval_each_steps=10 eval_baseline=0 eval_fresh=0
 
 Stage k (see the method): theta_old = theta_{k-1} (frozen), minimise
     L_k = L_FB + lam * L_rec(r_k) + mu_b * R^B + mu_q * R^Q.
@@ -41,7 +69,8 @@ End of stage: z_j <- T z_j for j < k (T between theta_k and theta_{k-1}, on a fr
               z_k = mean_i rbar_k(s_i) B_{theta_k}(s_i).  Only d numbers per task are stored.
 
 Logs (./logs/<run>/):
-    training_log.csv : per chunk, FB metrics + l_rec, r_b, r_q, z_shrink (= mean ||T z|| / ||z||), total_loss
+    training_log.csv : per chunk, FB metrics + new_reward_unexplained_fraction_training, old_rewards_lost_fraction,
+                       old_rewards_value_change, old_latent_length_ratio (= mean ||T z|| / ||z||), total_loss
     eval_log.csv     : per evaluation, for every env task '<label>_fresh_{mean,std,rew_corr,eps}' (z inferred from fresh
                        10k labels, as in the pretraining script) and, for the tasks of the stream seen so far,
                        '<label>_tracked_{mean,std,rew_corr,eps}' (z = stored latent z_j carried through the T's).
@@ -194,12 +223,28 @@ if __name__ == '__main__':
     EVAL_EACH_STEPS = int(kwargs['eval_each_steps']) if 'eval_each_steps' in kwargs else 0   # in chunks; 0 = only at the end of a stage
     EVAL_BASELINE   = bool(int(kwargs['eval_baseline'])) if 'eval_baseline' in kwargs else True
     EVAL_N          = 10_000      # number of states for the eval-time reward / reconstruction statistics
+    EVAL_FRESH      = bool(int(kwargs['eval_fresh'])) if 'eval_fresh' in kwargs else True
+
+    # ── Single-task fine-tuning ───────────────────────────────────────────────────
+    FINETUNE   = str(kwargs['finetune']) if 'finetune' in kwargs else 'none'
+    assert FINETUNE in ['none', 'actor', 'critic', 'reward_critic'], \
+        "finetune= must be none, actor, critic or reward_critic"
+    RFIT_STEPS = int(kwargs['rfit_steps']) if 'rfit_steps' in kwargs else 30_000
+    RFIT_LR    = float(kwargs['rfit_lr']) if 'rfit_lr' in kwargs else 3e-4
+    RFIT_BS    = int(kwargs['rfit_bs']) if 'rfit_bs' in kwargs else 4096
+    RFIT_CHUNK = min(1000, RFIT_STEPS)
+    assert RFIT_STEPS > 0 and RFIT_STEPS % RFIT_CHUNK == 0, "rfit_steps must be a multiple of 1000 (or < 1000)"
 
     # ── Logging ───────────────────────────────────────────────────────────────────
     now = datetime.now()
     date_time_str = now.strftime("%Y-%m-%d_%H-%M-%S")
 
-    exp_name = f'FBcontinual-{ENV_NAME}-' + '+'.join(TASKS)
+    if FINETUNE == 'none':
+        exp_name = f'FBcontinual-{ENV_NAME}-' + '+'.join(TASKS)
+    else:
+        exp_name = f'FBfinetune-{FINETUNE}-{ENV_NAME}-' + '+'.join(TASKS)
+        if 'n_labeled' in kwargs:
+            exp_name += f'-nl{N_LABELED}'
     base_name = f"{date_time_str}_{exp_name}"
 
     suffix = 0
@@ -221,10 +266,11 @@ if __name__ == '__main__':
 
     TRAIN_METRICS = ["fb_loss", "fb_diag", "fb_offdiag", "q_loss",
                      "orth_loss", "orth_loss_diag", "orth_loss_offdiag", "orth_linf", "orth_l2",
-                     "target_M", "M1", "F1", "B", "B_norm", "z_norm", "next_Q",
+                     "target_M", "M1", "F1", "B", "B_norm", "z_norm", "next_Q", "q_reward",
                      "b_cov_eig_min", "b_cov_eig_max",
                      "actor_loss", "q", "bc_dist",
-                     "total_loss", "l_rec", "r_b", "r_q", "z_shrink"]
+                     "total_loss", "new_reward_unexplained_fraction_training", "old_rewards_lost_fraction",
+                     "old_rewards_value_change", "old_latent_length_ratio"]
     train_logger = CSVLogger(
         filepath=f"{LOGS_FOLDER}/training_log.csv",
         fieldnames=["stage", "step"] + TRAIN_METRICS + ["time"],
@@ -562,7 +608,7 @@ if __name__ == '__main__':
             return state
 
     N_BENCH   = len(benchmarks)
-    NUM_EVALS = 5
+    NUM_EVALS = int(kwargs['num_evals']) if 'num_evals' in kwargs else 5
     print(NUM_TRAJECTORIES, TRAJECTORY_LEN, NUM_TRAJECTORIES * TRAJECTORY_LEN)
 
     # ── The stream of tasks ───────────────────────────────────────────────────────
@@ -579,6 +625,7 @@ if __name__ == '__main__':
     EVAL_FIELDS = (["stage", "step", "tag", "mean_fresh_all", "mean_fresh_tasks", "mean_tracked_tasks"]
                    + [f"{label}_fresh_{s}" for label in LABELS for s in ("mean", "std", "rew_corr", "eps")]
                    + [f"{label}_tracked_{s}" for label in TASKS for s in ("mean", "std", "rew_corr", "eps")]
+                   + [f"{label}_ft_{s}" for label in TASKS for s in ("mean", "std", "rew_corr", "eps")]
                    + ["time"])
     eval_logger = CSVLogger(filepath=f"{LOGS_FOLDER}/eval_log.csv", fieldnames=EVAL_FIELDS)
 
@@ -720,9 +767,9 @@ if __name__ == '__main__':
     class FBConfig:
         # --- FB (same defaults as the pretraining script: they must match the checkpoint) ---
         bc_coef:             float = 0.0      # weight of the behavior-cloning term of the DDPG actor (0 -> plain -Q.mean())
-        lr:                  float = 3e-4
+        lr:                  float = 1e-4
         lr_coef:             float = 1.0     # backward net lr = lr_coef * lr
-        fb_target_tau:       float = 0.005
+        fb_target_tau:       float = 0.01
         hidden_dim:          int   = 1024
         backward_hidden_dim: int   = 526     # (sic) same value as in the torch script
         feature_dim:         int   = 512
@@ -730,13 +777,14 @@ if __name__ == '__main__':
         stddev:              float = 0.2
         stddev_clip:         float = 0.3
         batch_size:          int   = 1024
-        ortho_coef:          float = 10.0
+        ortho_coef:          float = 1.0
         mix_ratio:           float = 0.5
         norm_z:              bool  = True
         q_loss:              bool  = True
         q_loss_coef:         float = 0.01
         add_trunk:           bool  = False
         discount:            float = 0.95
+        target_agg:          str   = 'min'    # bootstrap target of M over the two heads: 'min' (original FB / pretraining script) | 'mean'
         # --- continual terms ---
         lam:                 float = 1.0      # weight of L_rec
         mu_b:                float = 1.0      # weight of R^B
@@ -745,6 +793,15 @@ if __name__ == '__main__':
         n_est:               int   = 4096     # states of D per step to estimate Sigma_theta, A_theta
         ridge:               float = 1e-5     # ridge on every covariance before inversion
         cross_fit:           bool  = False    # cross-fitted L_rec
+        # --- latent of the current task inside the FB / actor loss (0 = off = original behaviour) ---
+        z_task_frac:         float = 0.0      # fraction of the z of L_FB and of the actor loss replaced by the latent of the current task
+        z_task_spread:       float = 0.5      # angular noise around that latent (0 = exactly the latent; 1 = 45 degrees)
+        actor_z_task_frac:   float = -1.0     # fraction of the ACTOR's z that is the task latent (-1 = same as z_task_frac)
+        freeze_fb:           bool  = False    # diagnostic: do not update F and B, only the actor
+        freeze_b:            bool  = False    # diagnostic: do not update B (F and the actor are still trained)
+        # --- critic loss / fine-tuning ---
+        fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
+        finetune:            str   = 'none'   # none | actor | critic | reward_critic (single-task fine-tuning, see docstring)
 
     class FBTrainingState(flax.struct.PyTreeNode):
         fb_params:             Any          # {'forward': ..., 'backward': ...}
@@ -763,6 +820,10 @@ if __name__ == '__main__':
         lab_r:         jnp.ndarray     # [n_labeled]            normalized rewards rbar_k (unit second moment)
         atoms:         jnp.ndarray     # [K, d]  stored latents z_j (rows >= n_atoms are zeros), normalized when sampling
         n_atoms:       jnp.ndarray     # int32 scalar = k - 1
+        z_run:         jnp.ndarray     # [d] E[rbar_k B] with B at the start of the stage (used instead of re-encoding when freeze_b=1)
+        z_cond:        jnp.ndarray     # [d] sqrt(d) * normalize(z_run): the fixed task latent of the fine-tuning modes
+        w_fit:         jnp.ndarray     # [d] Sigma_old^-1 z_run : fixed readout, B(s)^T w_fit ~ rbar_k(s)
+        w_q:           jnp.ndarray     # [d] Sigma_old^-1 z_cond: fixed readout of the reward in the fine-tuning Q loss
 
     class FBAgent:
 
@@ -824,7 +885,80 @@ if __name__ == '__main__':
             """Deterministic action (eval_mode=True in the torch agent). Works on batches of (obs, z)."""
             return self.actor_net.apply({'params': actor_params}, obs, z)
 
-        # ── update ────────────────────────────────────────────────────────────
+        # ── single-task fine-tuning step (called from update when finetune != 'none') ──
+
+        def _finetune_step(self, ts, sd, obs, action, next_obs, k_next, k_act, random_key, metrics):
+            """One update on the task of the stage. Every z (critic, bootstrap, actor) is the fixed latent z_cond.
+            L_FB, ortho, L_rec, R^B, R^Q are NOT computed.
+              actor         : F and B frozen, only the actor maximizes F(s, pi(s, z), z)^T z
+              critic        : B frozen; F trained with the Q loss only, reward r(s') = B(s')^T w_q (fixed readout)
+              reward_critic : same as critic (B was fit to the reward before the stage, see fit_backward_to_reward)"""
+            cfg = self.cfg
+            bs, d = cfg.batch_size, cfg.z_dim
+            discount = cfg.discount
+            z = jnp.broadcast_to(sd.z_cond[None, :], (bs, d))
+            fb_params, fb_optimizer_state = ts.fb_params, ts.fb_optimizer_state
+
+            if cfg.finetune in ('critic', 'reward_critic'):
+                # Q(s, a) = F(s, a, z)^T z regressed on r(s') + discount * min_heads F_bar(s', a', z)^T z,  a' = pi(s', z) + noise
+                reward = jax.lax.stop_gradient(
+                    self.backward_net.apply({'params': ts.fb_params['backward']}, next_obs) @ sd.w_q)
+                next_mu     = self.actor_net.apply({'params': ts.actor_params}, next_obs, z)
+                next_action = jax.lax.stop_gradient(
+                    sample_truncated_normal(next_mu, k_next, cfg.stddev, cfg.stddev_clip))
+                tF1, tF2 = self.forward_net.apply({'params': ts.fb_target_params['forward']}, next_obs, z, next_action)
+                next_Q   = jax.lax.stop_gradient(jnp.minimum((tF1 * z).sum(-1), (tF2 * z).sum(-1)))
+                target_Q = jax.lax.stop_gradient(reward + discount * next_Q)
+
+                def q_loss_fn(f_params):
+                    F1, F2 = self.forward_net.apply({'params': f_params}, obs, z, action)
+                    return (jnp.mean(((F1 * z).sum(-1) - target_Q) ** 2)
+                            + jnp.mean(((F2 * z).sum(-1) - target_Q) ** 2))
+
+                # gradient on F only; B gets zero gradients and is left untouched
+                q_loss, f_grads = jax.value_and_grad(q_loss_fn)(ts.fb_params['forward'])
+                zeros_b = jax.tree_util.tree_map(jnp.zeros_like, ts.fb_params['backward'])
+                fb_updates, fb_optimizer_state = self.fb_optimizer.update(
+                    {'forward': f_grads, 'backward': zeros_b}, ts.fb_optimizer_state, ts.fb_params)
+                fb_params = {'forward':  optax.apply_updates(ts.fb_params['forward'], fb_updates['forward']),
+                             'backward': ts.fb_params['backward']}
+                metrics.update({'q_loss': q_loss, 'next_Q': next_Q.mean(), 'q_reward': reward.mean(),
+                                'total_loss': q_loss})
+
+            # ── actor: maximize F(s, pi(s, z), z)^T z (TD3+BC if bc_coef > 0), with the freshly updated F
+            def actor_loss_fn(actor_params):
+                mu = self.actor_net.apply({'params': actor_params}, obs, z)
+                a  = sample_truncated_normal(mu, k_act, cfg.stddev, cfg.stddev_clip)
+                F1, F2 = self.forward_net.apply({'params': fb_params['forward']}, obs, z, a)
+                Q  = jnp.minimum((F1 * z).sum(-1), (F2 * z).sum(-1))
+                sq = jnp.mean((mu - action) ** 2, axis=-1)
+                if cfg.bc_coef > 0:
+                    actor_loss = -Q.mean() / jax.lax.stop_gradient(jnp.abs(Q).mean()) + cfg.bc_coef * sq.mean()
+                else:
+                    actor_loss = -Q.mean()
+                return actor_loss, {'actor_loss': actor_loss, 'q': Q.mean(), 'bc_dist': sq.mean()}
+
+            (_, actor_metrics), actor_grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(ts.actor_params)
+            actor_updates, actor_optimizer_state = self.actor_optimizer.update(
+                actor_grads, ts.actor_optimizer_state, ts.actor_params)
+            actor_params = optax.apply_updates(ts.actor_params, actor_updates)
+            metrics.update(actor_metrics)
+
+            tau_t = cfg.fb_target_tau
+            fb_target_params = jax.tree_util.tree_map(
+                lambda p, t: tau_t * p + (1 - tau_t) * t, fb_params, ts.fb_target_params)
+            ts = ts.replace(
+                fb_params=fb_params,
+                fb_target_params=fb_target_params,
+                actor_params=actor_params,
+                fb_optimizer_state=fb_optimizer_state,
+                actor_optimizer_state=actor_optimizer_state,
+                random_key=random_key,
+                steps=ts.steps + 1,
+            )
+            return ts, metrics
+
+        # ── update────────────────────────────────────────────────────────────
 
         @partial(jax.jit, static_argnames=("self",))
         def update(self, ts: FBTrainingState, replay_buffer: OfflineReplayBuffer, sd: StageData):
@@ -834,8 +968,15 @@ if __name__ == '__main__':
             discount = cfg.discount
 
             (random_key, k_batch, k_z, k_perm, k_mix, k_next, k_act,
-             k_est, k_nu0, k_nu1, k_nu2) = jax.random.split(ts.random_key, 11)
+             k_est, k_nu0, k_nu1, k_nu2, k_tz1, k_tz2) = jax.random.split(ts.random_key, 13)
             obs, action, next_obs, _ = replay_buffer.sample(k_batch, bs)
+
+            # every training metric is always returned (NaN when its term is not computed), so that the pytree of
+            # metrics does not depend on the branches taken
+            metrics = {m: jnp.full((), jnp.nan, dtype=jnp.float32) for m in TRAIN_METRICS}
+
+            if cfg.finetune != 'none':
+                return self._finetune_step(ts, sd, obs, action, next_obs, k_next, k_act, random_key, metrics)
 
             # states of D used to estimate Sigma_theta and A_theta (n >> d)
             obs_est = replay_buffer.obs[replay_buffer.sample_indices(k_est, cfg.n_est)]
@@ -849,42 +990,79 @@ if __name__ == '__main__':
                 mix_mask = jax.random.uniform(k_mix, (bs, 1)) < cfg.mix_ratio
                 z = jnp.where(mix_mask, mix_z, z)
 
+            # ── task latent of the CURRENT stage in the z distribution of L_FB and of the actor:
+            #    z_k = mean(rbar_k B_current) on the stage's labeled set D_k (fixed for the stage), plus a bit of angular noise
+            z_act = z      # z used by the actor loss (= the z of the FB loss unless actor_z_task_frac is set)
+            if cfg.z_task_frac > 0 or cfg.actor_z_task_frac > 0:
+                if cfg.freeze_b:
+                    z_cur = sd.z_run                                                         # computed once at the start of the stage
+                else:
+                    B_lab_sg = jax.lax.stop_gradient(
+                        self.backward_net.apply({'params': ts.fb_params['backward']}, sd.lab_obs))
+                    z_cur    = (sd.lab_r[:, None] * B_lab_sg).mean(axis=0)                   # [d] re-encoded with the current B
+                noise    = normalize(jax.random.normal(k_tz1, (bs, d)))
+                z_task   = math.sqrt(d) * normalize(normalize(z_cur)[None, :] + cfg.z_task_spread * noise)
+                u_task   = jax.random.uniform(k_tz2, (bs, 1))
+                z_base   = z
+                z        = jax.lax.stop_gradient(jnp.where(u_task < cfg.z_task_frac, z_task, z_base))
+                if cfg.actor_z_task_frac >= 0:     # the actor gets its own fraction of task latents
+                    z_act = jax.lax.stop_gradient(jnp.where(u_task < cfg.actor_z_task_frac, z_task, z_base))
+                else:
+                    z_act = z
+
+            use_ret        = cfg.mu_b > 0 or cfg.mu_q > 0     # the retention terms need latents z ~ nu
+            use_old_family = cfg.lam > 0 or use_ret           # Sigma_theta / T / M are needed
+
             # ── latents of the retention losses: z ~ nu = (1 - alpha) * uniform sphere + alpha * atoms ──
-            z_sphere = self.sample_z(k_nu0, bs)
-            n_at     = jnp.maximum(sd.n_atoms, 1)
-            at_idx   = jnp.minimum((jax.random.uniform(k_nu1, (bs,)) * n_at).astype(jnp.int32), n_at - 1)
-            z_atom   = math.sqrt(d) * normalize(sd.atoms[at_idx])
-            use_atom = (jax.random.uniform(k_nu2, (bs, 1)) < cfg.alpha) & (sd.n_atoms > 0)
-            z_ret    = jax.lax.stop_gradient(jnp.where(use_atom, z_atom, z_sphere))
+            if use_ret:
+                z_sphere = self.sample_z(k_nu0, bs)
+                n_at     = jnp.maximum(sd.n_atoms, 1)
+                at_idx   = jnp.minimum((jax.random.uniform(k_nu1, (bs,)) * n_at).astype(jnp.int32), n_at - 1)
+                z_atom   = math.sqrt(d) * normalize(sd.atoms[at_idx])
+                use_atom = (jax.random.uniform(k_nu2, (bs, 1)) < cfg.alpha) & (sd.n_atoms > 0)
+                z_ret    = jax.lax.stop_gradient(jnp.where(use_atom, z_atom, z_sphere))
 
             off_diag = 1.0 - jnp.eye(bs)
             n_off    = off_diag.sum()
 
-            # ── bootstrap term of the FB loss (classical: through the actor) ──
-            target_B = self.backward_net.apply({'params': ts.fb_target_params['backward']}, next_obs)
-            next_mu     = self.actor_net.apply({'params': ts.actor_params}, next_obs, z)
-            next_action = jax.lax.stop_gradient(
-                sample_truncated_normal(next_mu, k_next, cfg.stddev, cfg.stddev_clip))
-            target_F1, target_F2 = self.forward_net.apply(
-                {'params': ts.fb_target_params['forward']}, next_obs, z, next_action)
-            # target_M = jax.lax.stop_gradient(jnp.minimum(target_F1 @ target_B.T, target_F2 @ target_B.T))
-            target_M = jax.lax.stop_gradient(0.5 * (target_F1 @ target_B.T + target_F2 @ target_B.T))
-            next_Q   = jax.lax.stop_gradient(jnp.minimum((target_F1 * z).sum(-1), (target_F2 * z).sum(-1)))
+            if not cfg.freeze_fb:
+                # ── bootstrap of the critic losses (classical: through the actor) ──
+                next_mu     = self.actor_net.apply({'params': ts.actor_params}, next_obs, z)
+                next_action = jax.lax.stop_gradient(
+                    sample_truncated_normal(next_mu, k_next, cfg.stddev, cfg.stddev_clip))
+                target_F1, target_F2 = self.forward_net.apply(
+                    {'params': ts.fb_target_params['forward']}, next_obs, z, next_action)
+                if cfg.fb_objective:
+                    target_B = self.backward_net.apply({'params': ts.fb_target_params['backward']}, next_obs)
+                    tM1, tM2 = target_F1 @ target_B.T, target_F2 @ target_B.T
+                    if cfg.target_agg == 'min':
+                        target_M = jax.lax.stop_gradient(jnp.minimum(tM1, tM2))
+                    else:
+                        target_M = jax.lax.stop_gradient(0.5 * (tM1 + tM2))
+                if cfg.q_loss:
+                    next_Q = jax.lax.stop_gradient(jnp.minimum((target_F1 * z).sum(-1), (target_F2 * z).sum(-1)))
 
-            # ── FB update: L_FB + lam * L_rec + mu_b * R^B + mu_q * R^Q ───────
+            # ── FB update: [L_FB] + [Q loss] + [ortho] + lam * L_rec + mu_b * R^B + mu_q * R^Q
+            #    every term is computed only if it is used (static branches: fb_objective, q_loss, ortho_coef, lam, mu_b, mu_q)
             def fb_loss_fn(fb_params):
-                # ---- L_FB (identical to the pretraining script)
                 F1, F2 = self.forward_net.apply({'params': fb_params['forward']}, obs, z, action)
                 B      = self.backward_net.apply({'params': fb_params['backward']}, next_obs)
-                M1, M2 = F1 @ B.T, F2 @ B.T
+                total  = jnp.zeros(())
+                m      = {}
 
-                fb_offdiag = 0.5 * sum(
-                    (((M - discount * target_M) ** 2) * off_diag).sum() / n_off for M in (M1, M2))
-                fb_diag = -sum(jnp.diag(M).mean() for M in (M1, M2))
-                fb_loss = fb_offdiag + fb_diag
+                if cfg.fb_objective:
+                    # ---- L_FB (identical to the pretraining script)
+                    M1, M2 = F1 @ B.T, F2 @ B.T
+                    fb_offdiag = 0.5 * sum(
+                        (((Mh - discount * target_M) ** 2) * off_diag).sum() / n_off for Mh in (M1, M2))
+                    fb_diag = -sum(jnp.diag(Mh).mean() for Mh in (M1, M2))
+                    fb_loss = fb_offdiag + fb_diag
+                    total   = total + fb_loss
+                    m.update({'fb_loss': fb_loss, 'fb_diag': fb_diag, 'fb_offdiag': fb_offdiag,
+                              'target_M': target_M.mean(), 'M1': M1.mean()})
 
-                q_loss = jnp.zeros(())
                 if cfg.q_loss:
+                    # ---- Q loss with the implicit reward B(s')^T Sigma^-1 z (Sigma on the batch)
                     B_sg    = jax.lax.stop_gradient(B)
                     cov     = B_sg.T @ B_sg / B_sg.shape[0]
                     inv_cov = jnp.linalg.inv(cov)
@@ -892,80 +1070,88 @@ if __name__ == '__main__':
                     target_Q = jax.lax.stop_gradient(implicit_reward + discount * next_Q)
                     Q1, Q2   = (F1 * z).sum(-1), (F2 * z).sum(-1)
                     q_loss   = jnp.mean((Q1 - target_Q) ** 2) + jnp.mean((Q2 - target_Q) ** 2)
-                    fb_loss  = fb_loss + cfg.q_loss_coef * q_loss
+                    # fb_objective=1: L_FB + q_loss_coef * Q loss ; fb_objective=0: the Q loss alone
+                    total    = total + (cfg.q_loss_coef if cfg.fb_objective else 1.0) * q_loss
+                    m.update({'q_loss': q_loss, 'next_Q': next_Q.mean(), 'q_reward': implicit_reward.mean()})
 
-                Cov               = B @ B.T
-                orth_loss_diag    = -2 * jnp.diag(Cov).mean()
-                orth_loss_offdiag = ((Cov ** 2) * off_diag).sum() / n_off
-                orth_loss         = orth_loss_offdiag + orth_loss_diag
-                fb_loss           = fb_loss + cfg.ortho_coef * orth_loss
+                if cfg.ortho_coef > 0:
+                    Cov               = B @ B.T
+                    orth_loss_diag    = -2 * jnp.diag(Cov).mean()
+                    orth_loss_offdiag = ((Cov ** 2) * off_diag).sum() / n_off
+                    orth_loss         = orth_loss_offdiag + orth_loss_diag
+                    total             = total + cfg.ortho_coef * orth_loss
+                    m.update({'orth_loss': orth_loss, 'orth_loss_diag': orth_loss_diag,
+                              'orth_loss_offdiag': orth_loss_offdiag})
 
-                # ---- batch estimates of Sigma_theta, A_theta, T_theta, M_theta (n_est states of D)
-                B_new_est = self.backward_net.apply({'params': fb_params['backward']}, obs_est)
-                B_old_est = jax.lax.stop_gradient(
-                    self.backward_net.apply({'params': sd.old_params['backward']}, obs_est))
-                Sigma_th, T, M = old_family_matrices(B_new_est, B_old_est, sd.sigma_old_inv, cfg.ridge)
+                if use_old_family:
+                    # ---- batch estimates of Sigma_theta, A_theta, T_theta, M_theta (n_est states of D)
+                    B_new_est = self.backward_net.apply({'params': fb_params['backward']}, obs_est)
+                    B_old_est = jax.lax.stop_gradient(
+                        self.backward_net.apply({'params': sd.old_params['backward']}, obs_est))
+                    Sigma_th, T, M = old_family_matrices(B_new_est, B_old_est, sd.sigma_old_inv, cfg.ridge)
 
-                # ---- L_rec on the labeled set (whole set at every step, detached coefficient)
-                B_lab = self.backward_net.apply({'params': fb_params['backward']}, sd.lab_obs)
-                l_rec = reconstruction_loss(B_lab, sd.lab_r, Sigma_th, cfg.cross_fit)
+                if cfg.lam > 0:
+                    # ---- L_rec on the labeled set (whole set at every step, detached coefficient)
+                    B_lab = self.backward_net.apply({'params': fb_params['backward']}, sd.lab_obs)
+                    l_rec = reconstruction_loss(B_lab, sd.lab_r, Sigma_th, cfg.cross_fit)
+                    total = total + cfg.lam * l_rec
+                    m['new_reward_unexplained_fraction_training'] = l_rec
 
-                # ---- R^B (closed form, differentiated through A_theta and Sigma_theta)
-                r_b = retention_basis_loss(z_ret, M, sd.sigma_old_inv)
+                if cfg.mu_b > 0:
+                    # ---- R^B (closed form, differentiated through A_theta and Sigma_theta)
+                    r_b   = retention_basis_loss(z_ret, M, sd.sigma_old_inv)
+                    total = total + cfg.mu_b * r_b
+                    m['old_rewards_lost_fraction'] = r_b
 
-                # ---- R^Q: values of the re-encoded old family r_z, matched head by head. z' = sg(T z).
-                z_new     = jax.lax.stop_gradient(z_ret @ T.T)               # rows: (T z)^T
-                z_new_bar = math.sqrt(d) * normalize(z_new)
-                nF1, nF2  = self.forward_net.apply({'params': fb_params['forward']}, obs, z_new_bar, action)
-                oF1, oF2  = jax.lax.stop_gradient(self.forward_net.apply(
-                    {'params': sd.old_params['forward']}, obs, z_ret, action))
-                r_q = 0.5 * (jnp.mean(((nF1 * z_new).sum(-1) - (oF1 * z_ret).sum(-1)) ** 2)
-                             + jnp.mean(((nF2 * z_new).sum(-1) - (oF2 * z_ret).sum(-1)) ** 2))
-                z_shrink = jnp.mean(jnp.linalg.norm(z_new, axis=-1) / jnp.linalg.norm(z_ret, axis=-1))
+                if cfg.mu_q > 0:
+                    # ---- R^Q: values of the re-encoded old family r_z, matched head by head. z' = sg(T z).
+                    z_new     = jax.lax.stop_gradient(z_ret @ T.T)               # rows: (T z)^T
+                    z_new_bar = math.sqrt(d) * normalize(z_new)
+                    nF1, nF2  = self.forward_net.apply({'params': fb_params['forward']}, obs, z_new_bar, action)
+                    oF1, oF2  = jax.lax.stop_gradient(self.forward_net.apply(
+                        {'params': sd.old_params['forward']}, obs, z_ret, action))
+                    r_q = 0.5 * (jnp.mean(((nF1 * z_new).sum(-1) - (oF1 * z_ret).sum(-1)) ** 2)
+                                 + jnp.mean(((nF2 * z_new).sum(-1) - (oF2 * z_ret).sum(-1)) ** 2))
+                    total = total + cfg.mu_q * r_q
+                    m.update({'old_rewards_value_change': r_q,
+                              'old_latent_length_ratio': jnp.mean(jnp.linalg.norm(z_new, axis=-1)
+                                                                  / jnp.linalg.norm(z_ret, axis=-1))})
 
-                total = fb_loss + cfg.lam * l_rec + cfg.mu_b * r_b + cfg.mu_q * r_q
+                B_d      = jax.lax.stop_gradient(B)
+                eye_diff = B_d.T @ B_d / B_d.shape[0] - jnp.eye(B_d.shape[1])
+                b_eigs   = jnp.linalg.eigvalsh(B_d.T @ B_d / B_d.shape[0])
+                m.update({
+                    'F1':            F1.mean(),
+                    'B':             B_d.mean(),
+                    'B_norm':        jnp.linalg.norm(B_d, axis=-1).mean(),
+                    'z_norm':        jnp.linalg.norm(z, axis=-1).mean(),
+                    'orth_linf':     jnp.max(jnp.abs(eye_diff)),
+                    'orth_l2':       jnp.linalg.norm(eye_diff) / math.sqrt(B_d.shape[1]),
+                    'b_cov_eig_min': b_eigs[0],
+                    'b_cov_eig_max': b_eigs[-1],
+                    'total_loss':    total,
+                })
+                return total, m
 
-                eye_diff = B.T @ B / B.shape[0] - jnp.eye(B.shape[1])
-                b_eigs = jnp.linalg.eigvalsh(jax.lax.stop_gradient(B).T @ jax.lax.stop_gradient(B) / B.shape[0])
-                metrics = {
-                    'target_M':          target_M.mean(),
-                    'M1':                M1.mean(),
-                    'F1':                F1.mean(),
-                    'B':                 B.mean(),
-                    'B_norm':            jnp.linalg.norm(B, axis=-1).mean(),
-                    'z_norm':            jnp.linalg.norm(z, axis=-1).mean(),
-                    'fb_loss':           fb_loss,
-                    'fb_diag':           fb_diag,
-                    'fb_offdiag':        fb_offdiag,
-                    'q_loss':            q_loss,
-                    'orth_loss':         orth_loss,
-                    'orth_loss_diag':    orth_loss_diag,
-                    'orth_loss_offdiag': orth_loss_offdiag,
-                    'orth_linf':         jnp.max(jnp.abs(eye_diff)),
-                    'orth_l2':           jnp.linalg.norm(eye_diff) / math.sqrt(B.shape[1]),
-                    'next_Q':            next_Q.mean(),
-                    'b_cov_eig_min':     b_eigs[0],
-                    'b_cov_eig_max':     b_eigs[-1],
-                    'total_loss':        total,
-                    'l_rec':             l_rec,
-                    'r_b':               r_b,
-                    'r_q':               r_q,
-                    'z_shrink':          z_shrink,
-                }
-                return total, metrics
-
-            (_, metrics), fb_grads = jax.value_and_grad(fb_loss_fn, has_aux=True)(ts.fb_params)
-            fb_updates, fb_optimizer_state = self.fb_optimizer.update(
-                fb_grads, ts.fb_optimizer_state, ts.fb_params)
-            fb_params = optax.apply_updates(ts.fb_params, fb_updates)
+            if cfg.freeze_fb:      # diagnostic: F and B (and their Adam state) are not updated, FB losses not computed
+                fb_params, fb_optimizer_state = ts.fb_params, ts.fb_optimizer_state
+            else:
+                (_, fb_metrics), fb_grads = jax.value_and_grad(fb_loss_fn, has_aux=True)(ts.fb_params)
+                metrics.update(fb_metrics)
+                fb_updates, fb_optimizer_state = self.fb_optimizer.update(
+                    fb_grads, ts.fb_optimizer_state, ts.fb_params)
+                if cfg.freeze_b:       # B is not updated (F and the actor still are)
+                    fb_updates = {'forward': fb_updates['forward'],
+                                  'backward': jax.tree_util.tree_map(jnp.zeros_like, fb_updates['backward'])}
+                fb_params = optax.apply_updates(ts.fb_params, fb_updates)
 
             # ── Actor update (DDPG / TD3-like, uses the freshly updated forward net, as in torch) ──
             # maximize F(s, pi(s,z), z)^T z. With bc_coef > 0: TD3+BC (scale-free Q term, the normalizer is not differentiated).
             def actor_loss_fn(actor_params):
-                mu = self.actor_net.apply({'params': actor_params}, obs, z)
+                mu = self.actor_net.apply({'params': actor_params}, obs, z_act)
                 a  = sample_truncated_normal(mu, k_act, cfg.stddev, cfg.stddev_clip)
-                F1, F2 = self.forward_net.apply({'params': fb_params['forward']}, obs, z, a)
-                Q = jnp.minimum((F1 * z).sum(-1), (F2 * z).sum(-1))
+                F1, F2 = self.forward_net.apply({'params': fb_params['forward']}, obs, z_act, a)
+                Q = jnp.minimum((F1 * z_act).sum(-1), (F2 * z_act).sum(-1))
                 sq = jnp.mean((mu - action) ** 2, axis=-1)
                 if cfg.bc_coef > 0:
                     actor_loss = -Q.mean() / jax.lax.stop_gradient(jnp.abs(Q).mean()) + cfg.bc_coef * sq.mean()
@@ -1001,12 +1187,29 @@ if __name__ == '__main__':
             return ts, metrics
 
     fb_config = FBConfig(batch_size=BATCH_SIZE)
-    for _k, _typ in (('discount', float), ('bc_coef', float), ('lam', float), ('mu_b', float), ('mu_q', float),
-                     ('alpha', float), ('n_est', int), ('ridge', float)):
+    for _k, _typ in (('discount', float), ('bc_coef', float), ('ortho_coef', float), ('q_loss_coef', float),
+                     ('lr', float), ('fb_target_tau', float), ('mix_ratio', float),
+                     ('lam', float), ('mu_b', float), ('mu_q', float),
+                     ('alpha', float), ('n_est', int), ('ridge', float),
+                     ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float)):
         if _k in kwargs:
             fb_config = dataclasses.replace(fb_config, **{_k: _typ(kwargs[_k])})
+    if 'target_agg' in kwargs:
+        assert kwargs['target_agg'] in ['min', 'mean'], 'target_agg= must be min or mean'
+        fb_config = dataclasses.replace(fb_config, target_agg=kwargs['target_agg'])
+    if 'freeze_b' in kwargs:
+        fb_config = dataclasses.replace(fb_config, freeze_b=bool(int(kwargs['freeze_b'])))
+    if 'freeze_fb' in kwargs:
+        fb_config = dataclasses.replace(fb_config, freeze_fb=bool(int(kwargs['freeze_fb'])))
     if 'cross_fit' in kwargs:
         fb_config = dataclasses.replace(fb_config, cross_fit=bool(int(kwargs['cross_fit'])))
+    if 'fb_objective' in kwargs:
+        fb_config = dataclasses.replace(fb_config, fb_objective=bool(int(kwargs['fb_objective'])))
+    fb_config = dataclasses.replace(fb_config, finetune=FINETUNE)
+    assert fb_config.fb_objective or fb_config.q_loss, 'fb_objective=0 needs the Q loss (q_loss=True)'
+    if FINETUNE != 'none':
+        print(f'finetune={FINETUNE}: z = fixed task latent; fb_objective, ortho_coef, lam, mu_b, mu_q, alpha, '
+              f'z_task_*, freeze_b, freeze_fb and mix_ratio are ignored')
     assert 0.0 <= fb_config.alpha <= 1.0, 'alpha= must be in [0, 1]'
     assert fb_config.norm_z, 'the method assumes norm_z=True (z on the sphere of radius sqrt(d))'
     Z_DIM = fb_config.z_dim
@@ -1074,6 +1277,66 @@ if __name__ == '__main__':
     def big_backward(backward_params, obs, chunk=25_000):
         return jnp.concatenate([backward_apply(backward_params, obs[i:i + chunk]) for i in range(0, obs.shape[0], chunk)])
 
+    @jax.jit
+    def ft_recon_stats(backward_params, hold_obs, r_scaled, w):
+        """Reconstruction with the FIXED readout w of the stage, r_hat = B(s)^T w (scale of rbar), on held-out states.
+        Returns (fraction of the energy of r_scaled not explained, correlation(r_scaled, r_hat))."""
+        rec  = agent.backward_net.apply({'params': backward_params}, hold_obs) @ w
+        eps  = jnp.mean((r_scaled - rec) ** 2) / (jnp.mean(r_scaled ** 2) + 1e-12)
+        rc, rr = rec - rec.mean(), r_scaled - r_scaled.mean()
+        corr = (rc * rr).sum() / (jnp.sqrt((rc ** 2).sum() * (rr ** 2).sum()) + 1e-12)
+        return eps, corr
+
+    def ft_reward_quality(backward_params, task_idx, w_fit, m2):
+        """Quality of the reward the fine-tuned critic is trained on (B^T w_fit vs rbar), on EVAL_N fresh dataset states."""
+        reward_fn, _, param = benchmarks[task_idx]
+        hold_obs, _, _, hold_aux = replay_buffer.sample(next_eval_key(), EVAL_N)
+        r_hold = reward_fn(hold_aux, param) / math.sqrt(m2 + 1e-12)
+        eps, corr = ft_recon_stats(backward_params, hold_obs, r_hold, w_fit)
+        return float(eps), float(corr)
+
+    def fit_backward_to_reward(ts, sd, task_idx, m2):
+        """finetune=reward_critic, phase 1: B alone is regressed on the labeled set of the stage with the readout FIXED,
+            min mean_i (B(s_i)^T w_fit - rbar(s_i))^2    (the fixed-z experiment, warm-started from the current B).
+        F, the actor and w_fit / w_q / z_cond are not touched. Returns ts with the new B (target = copy, fresh Adam)."""
+        n   = int(sd.lab_obs.shape[0])
+        bs  = min(RFIT_BS, n)
+        opt = optax.adam(optax.cosine_decay_schedule(RFIT_LR, RFIT_STEPS))
+        params    = ts.fb_params['backward']
+        opt_state = opt.init(params)
+
+        @jax.jit
+        def run_chunk(params, opt_state, key, lab_obs, lab_r, w_fit):
+            def body(carry, k):
+                p, s = carry
+                idx  = jax.random.randint(k, (bs,), 0, n)
+                def loss_fn(p):
+                    B = agent.backward_net.apply({'params': p}, lab_obs[idx])
+                    return jnp.mean((B @ w_fit - lab_r[idx]) ** 2)
+                loss, g = jax.value_and_grad(loss_fn)(p)
+                upd, s  = opt.update(g, s, p)
+                return (optax.apply_updates(p, upd), s), loss
+            (params, opt_state), losses = jax.lax.scan(body, (params, opt_state), jax.random.split(key, RFIT_CHUNK))
+            return params, opt_state, losses.mean()
+
+        eps0, corr0 = ft_reward_quality(params, task_idx, sd.w_fit, m2)
+        print(f'[reward fit] before: held-out eps={eps0:.4e} corr={corr0:.4f}')
+        for c in tqdm(range(RFIT_STEPS // RFIT_CHUNK), desc='reward fit (B only)'):
+            params, opt_state, loss = run_chunk(params, opt_state, next_stage_key(), sd.lab_obs, sd.lab_r, sd.w_fit)
+            if (c + 1) % 5 == 0:
+                tqdm.write(f'  reward fit step {(c + 1) * RFIT_CHUNK}: train loss {float(loss):.4e}')
+        eps1, corr1 = ft_reward_quality(params, task_idx, sd.w_fit, m2)
+        msg = (f'[reward fit] {RFIT_STEPS} steps, lr={RFIT_LR}, bs={bs}, n_labeled={n}: held-out eps {eps0:.4e} -> {eps1:.4e}, '
+               f'corr {corr0:.4f} -> {corr1:.4f}')
+        print(msg)
+        with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
+            file.write(msg + '\n')
+
+        fb_params = {'forward': ts.fb_params['forward'], 'backward': params}
+        return ts.replace(fb_params=fb_params,
+                          fb_target_params=jax.tree_util.tree_map(jnp.copy, fb_params),
+                          fb_optimizer_state=agent.fb_optimizer.init(fb_params))
+
     def begin_stage(ts, k, task_idx, latents):
         """theta_old <- theta; Sigma_old; labeled set D_k with normalized rewards; atoms; reset of Adam / target nets."""
         reward_fn, label, param = benchmarks[task_idx]
@@ -1100,8 +1363,11 @@ if __name__ == '__main__':
         if len(latents) > 0:
             atoms = atoms.at[:len(latents)].set(jnp.stack(latents))
 
+        z_run  = jnp.mean(lab_r[:, None] * backward_apply(ts.fb_params['backward'], lab_obs), axis=0)
+        z_cond = math.sqrt(Z_DIM) * normalize(z_run)
         sd = StageData(old_params=old_params, sigma_old_inv=sigma_old_inv, lab_obs=lab_obs, lab_r=lab_r,
-                       atoms=atoms, n_atoms=jnp.asarray(len(latents), dtype=jnp.int32))
+                       atoms=atoms, n_atoms=jnp.asarray(len(latents), dtype=jnp.int32),
+                       z_run=z_run, z_cond=z_cond, w_fit=sigma_old_inv @ z_run, w_q=sigma_old_inv @ z_cond)
 
         # fresh Adam states; target network = copy of theta_old
         ts = ts.replace(
@@ -1188,14 +1454,15 @@ if __name__ == '__main__':
 
     eval_history = []   # for rewards.png
 
-    def run_eval(ts, stage, step, tag, latents, m2s):
-        """fresh: z inferred from fresh 10k labels for every env task (as in the pretraining script).
-        tracked: z = stored latent z_j (carried through the T's) for the tasks of the stream already learned."""
+    def run_eval(ts, stage, step, tag, latents, m2s, ft=None):
+        """fresh: z inferred from fresh 10k labels for every env task (as in the pretraining script). Skipped if eval_fresh=0.
+        tracked: z = stored latent z_j (carried through the T's) for the tasks of the stream already learned.
+        ft = (task_idx, label, z_cond, w_fit, m2) in the fine-tuning modes: rollouts with the fixed task latent z_cond."""
         start_time = time.time()
         backward_params = ts.fb_params['backward']
         items, stats = [], {}
 
-        for b in range(N_BENCH):
+        for b in (range(N_BENCH) if EVAL_FRESH else []):
             reward_fn, label, param = benchmarks[b]
             zs = []
             for _ in range(NUM_EVALS):
@@ -1220,11 +1487,16 @@ if __name__ == '__main__':
             z_bar = math.sqrt(Z_DIM) * normalize(z_j)
             items.append((('tracked', j), b, jnp.tile(z_bar[None, :], (NUM_EVALS, 1))))
 
+        if ft is not None:
+            ft_b, ft_label, ft_z, ft_w, ft_m2 = ft
+            stats[('ft', 0)] = ft_reward_quality(backward_params, ft_b, ft_w, ft_m2)
+            items.append((('ft', 0), ft_b, jnp.tile(ft_z[None, :], (NUM_EVALS, 1))))
+
         returns = rollout_returns(ts.actor_params, items)
 
         row = {'stage': stage, 'step': step, 'tag': tag}
-        fresh_means = np.zeros(N_BENCH)
-        for b, label in enumerate(LABELS):
+        fresh_means = np.full(N_BENCH, np.nan)
+        for b, label in (enumerate(LABELS) if EVAL_FRESH else []):
             m, s = returns[('fresh', b)]
             eps, corr = stats[('fresh', b)]
             row.update({f'{label}_fresh_mean': m, f'{label}_fresh_std': s, f'{label}_fresh_rew_corr': corr, f'{label}_fresh_eps': eps})
@@ -1236,6 +1508,12 @@ if __name__ == '__main__':
             eps, corr = stats[('tracked', j)]
             row.update({f'{label}_tracked_mean': m, f'{label}_tracked_std': s, f'{label}_tracked_rew_corr': corr, f'{label}_tracked_eps': eps})
             tracked_means.append(m)
+        if ft is not None:
+            m, s = returns[('ft', 0)]
+            eps, corr = stats[('ft', 0)]
+            row.update({f'{ft_label}_ft_mean': m, f'{ft_label}_ft_std': s, f'{ft_label}_ft_rew_corr': corr,
+                        f'{ft_label}_ft_eps': eps})
+            print(f'[{tag}] {ft_label} fine-tuned: return {m:.2f} +/- {s:.2f}   reward eps={eps:.4e} corr={corr:.4f}')
         row['mean_fresh_all']     = float(fresh_means.mean())
         row['mean_fresh_tasks']   = float(fresh_means[TASK_IDX].mean())
         row['mean_tracked_tasks'] = float(np.mean(tracked_means)) if tracked_means else float('nan')
@@ -1247,23 +1525,45 @@ if __name__ == '__main__':
         plot_rewards()
 
     def plot_rewards():
-        """One panel per task of the stream: fresh and tracked returns at every evaluation; vertical lines = stage ends."""
-        n = len(TASKS)
-        num_cols = min(4, n)
-        num_rows = n // num_cols + int(n % num_cols != 0)
-        fig, axs = plt.subplots(num_rows, num_cols, figsize=(num_cols * 6, num_rows * 4.5))
-        axs = np.atleast_1d(axs).flatten()
+        """One column per env task. Row 1: return, mean +/- std over the episodes (fresh z, and stored latent for stream tasks).
+        Row 2: reward-reconstruction correlation. Vertical lines = stage ends."""
+        n = len(LABELS)
+        fig, axs = plt.subplots(2, n, figsize=(n * 4.5, 8), squeeze=False)
         xs = np.arange(len(eval_history))
-        for i, label in enumerate(TASKS):
-            axs[i].plot(xs, [r.get(f'{label}_fresh_mean', np.nan) for r in eval_history], label='fresh z')
-            axs[i].plot(xs, [r.get(f'{label}_tracked_mean', np.nan) for r in eval_history], label='tracked z_j')
-            for x, r in zip(xs, eval_history):
-                if r['tag'] == 'end':
-                    axs[i].axvline(x, color='gray', alpha=0.3)
-            axs[i].set_title(label)
-            axs[i].legend()
+        end_xs = [x for x, r in zip(xs, eval_history) if r['tag'] == 'end']
+
+        def series(label, kind, suffix):
+            return np.array([r.get(f'{label}_{kind}_{suffix}', np.nan) for r in eval_history], dtype=float)
+
+        for i, label in enumerate(LABELS):
+            in_stream = label in TASKS
+            kinds = [('fresh', 'fresh latent (zero-shot)')]
+            if in_stream:
+                kinds.append(('tracked', 'stored latent (carried through T)'))
+            if in_stream and FINETUNE != 'none':
+                kinds.append(('ft', f'fine-tuned ({FINETUNE}, fixed task z)'))
+
+            # row 1: return with a +/- 1 std band
+            ax = axs[0, i]
+            for kind, name in kinds:
+                m, s = series(label, kind, 'mean'), series(label, kind, 'std')
+                line, = ax.plot(xs, m, label=name)
+                ax.fill_between(xs, m - s, m + s, color=line.get_color(), alpha=0.2)
+            # row 2: correlation
+            ax2 = axs[1, i]
+            for kind, name in kinds:
+                ax2.plot(xs, series(label, kind, 'rew_corr'), label=name)
+            ax2.set_ylim(-0.1, 1.05)
+
+            for a, ylabel in ((ax, 'return (mean ± std over episodes)'), (ax2, 'reward reconstruction correlation')):
+                for x in end_xs:
+                    a.axvline(x, color='gray', alpha=0.3)
+                a.set_title(label + (' (learned task)' if in_stream else ''))
+                a.set_xlabel('evaluation index')
+                a.set_ylabel(ylabel)
+                a.legend(fontsize=7)
         plt.tight_layout()
-        plt.savefig(f"{LOGS_FOLDER}/rewards.png")
+        plt.savefig(f"{LOGS_FOLDER}/rewards_and_correlations.png")
         plt.close()
 
     def save_agent(ts, path, latents, m2s, stage):
@@ -1290,6 +1590,14 @@ if __name__ == '__main__':
         print(f"\n===== Stage {k}/{len(TASKS)}: task '{task}' ({len(latents)} previous task(s)) =====")
         train_state, stage_data, m2_k = begin_stage(train_state, k, task_idx, latents)
 
+        ft_info = None
+        if FINETUNE != 'none':
+            if FINETUNE == 'reward_critic':
+                train_state = fit_backward_to_reward(train_state, stage_data, task_idx, m2_k)
+            ft_info = (task_idx, task, stage_data.z_cond, stage_data.w_fit, m2_k)
+            # step 0 of the fine-tuning: zero-shot policy with z_cond (+ quality of the reward the critic will use)
+            run_eval(train_state, k, 0, 'ft_start', [], [], ft_info)
+
         for chunk in tqdm(range(CHUNKS_PER_STAGE), desc=f'stage {k}'):
             start_time = time.time()
             train_state, current_metrics = train_chunk(train_state, replay_buffer, stage_data)
@@ -1304,10 +1612,10 @@ if __name__ == '__main__':
             is_last = (chunk + 1) == CHUNKS_PER_STAGE
             if EVAL_EACH_STEPS > 0 and (chunk + 1) % EVAL_EACH_STEPS == 0 and not is_last:
                 # mid-stage: only fresh zero-shot (the stored latents are still expressed in the coordinates of theta_old)
-                run_eval(train_state, k, step_in_stage, 'mid', [], [])
+                run_eval(train_state, k, step_in_stage, 'mid', [], [], ft_info)
 
         latents = end_stage(train_state, stage_data, latents)
         m2s.append(m2_k)
 
         save_agent(train_state, f"{MODEL_SAVE_FOLDER}/fb_stage_{k}_{task}.pickle", latents, m2s, k)
-        run_eval(train_state, k, STEPS_PER_STAGE, 'end', latents, m2s)
+        run_eval(train_state, k, STEPS_PER_STAGE, 'end', latents, m2s, ft_info)

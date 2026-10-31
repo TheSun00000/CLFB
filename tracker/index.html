@@ -1,0 +1,552 @@
+<title>CLFB Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: sticky top bar with hash-routed sections (overview, experiments, updates, next, slides); one reading column, wide tables scroll inside their own box. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #16202e;
+  --muted: #5b6678;
+  --line: #dde2ea;
+  --accent: #1f5fbf;
+  --accent-soft: #e4edfb;
+  --good: #1a7f4b;
+  --good-soft: #def3e7;
+  --warn: #9a6200;
+  --warn-soft: #fbefd5;
+  --bad: #b3261e;
+  --bad-soft: #fbe3e1;
+  --idle: #5b6678;
+  --idle-soft: #e9ecf1;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151e; --surface: #171f2b; --ink: #e6ebf3; --muted: #99a5b8; --line: #2a3546;
+    --accent: #6ea4f0; --accent-soft: #1c2d47;
+    --good: #5fcf94; --good-soft: #163a29; --warn: #e8b04a; --warn-soft: #3a2e12;
+    --bad: #f08a83; --bad-soft: #43201e; --idle: #99a5b8; --idle-soft: #232d3c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151e; --surface: #171f2b; --ink: #e6ebf3; --muted: #99a5b8; --line: #2a3546;
+  --accent: #6ea4f0; --accent-soft: #1c2d47;
+  --good: #5fcf94; --good-soft: #163a29; --warn: #e8b04a; --warn-soft: #3a2e12;
+  --bad: #f08a83; --bad-soft: #43201e; --idle: #99a5b8; --idle-soft: #232d3c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 56px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+a { color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
+code { background: var(--idle-soft); padding: 1px 5px; border-radius: 3px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.25; margin: 0; }
+h2 { font-size: 22px; font-weight: 600; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9; background: var(--surface); border-bottom: 1px solid var(--line);
+  margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px))); padding-inline: max(16px, env(safe-area-inset-left, 0px)); }
+.bar-in { max-width: 1040px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 28px; padding-block: 10px 0; }
+.brand { display: flex; align-items: baseline; gap: 10px; padding-bottom: 8px; }
+.brand b { font-size: 17px; font-weight: 600; letter-spacing: 0.01em; }
+.brand span { color: var(--muted); font-size: 13px; }
+nav { display: flex; gap: 2px; overflow-x: auto; margin-left: auto; }
+nav a { color: var(--muted); text-decoration: none; padding: 8px 12px 9px; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 500; white-space: nowrap; }
+nav a:hover { color: var(--ink); }
+nav a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+main { max-width: 1040px; margin: 0 auto; padding-top: 28px; }
+section[hidden] { display: none; }
+.head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.head p { color: var(--muted); margin-top: 4px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 20px; }
+.stack { display: grid; gap: 16px; }
+.cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.cols > * { min-width: 0; }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 500; }
+.panel .label { margin-bottom: 8px; display: block; }
+.eq { font-family: var(--font-mono); font-size: 13.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
+dt { font-family: var(--font-mono); font-size: 13px; color: var(--accent); }
+dd { margin: 0; color: var(--ink); min-width: 0; }
+ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 99px; background: var(--idle-soft); color: var(--idle); white-space: nowrap; }
+.pill.planned { background: var(--idle-soft); color: var(--idle); }
+.pill.running { background: var(--accent-soft); color: var(--accent); }
+.pill.done { background: var(--good-soft); color: var(--good); }
+.pill.failed { background: var(--bad-soft); color: var(--bad); }
+.pill.todo { background: var(--warn-soft); color: var(--warn); }
+
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+select, input[type="text"], textarea { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; min-width: 0; }
+button { font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+button.primary:hover { color: var(--bg); opacity: 0.9; }
+button:disabled { opacity: 0.4; cursor: default; }
+
+.tablebox { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 500; padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.num, td.mono { font-family: var(--font-mono); font-size: 13px; }
+td .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.cfg { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); max-width: 300px; }
+
+.pill.pending { background: var(--warn-soft); color: var(--warn); }
+.pill.finished { background: var(--good-soft); color: var(--good); }
+.pill.cancelled { background: var(--idle-soft); color: var(--idle); }
+.counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.counts .pill { font-size: 13px; padding: 3px 11px; }
+.cmd { font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin-top: 6px; overflow-wrap: anywhere; max-height: 7.5em; overflow: auto; }
+.folders { font-family: var(--font-mono); font-size: 12px; color: var(--muted); display: grid; gap: 2px; overflow-wrap: anywhere; }
+.errtxt { font-family: var(--font-mono); font-size: 12px; color: var(--bad); margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 8em; overflow: auto; }
+td.wide { min-width: 280px; }
+.other { margin-top: 18px; }
+.other summary { cursor: pointer; font-weight: 500; color: var(--muted); padding: 6px 0; }
+.other .tablebox { margin-top: 8px; }
+.asof { margin-top: 14px; color: var(--muted); font-size: 13px; font-family: var(--font-mono); }
+.note { color: var(--muted); font-size: 13px; margin: -6px 0 16px; max-width: 80ch; }
+.fam h3 { font-size: 17px; }
+.fam > p { color: var(--muted); margin: 4px 0 14px; font-size: 14px; }
+.fam .tablebox { border-radius: 4px; }
+td.pm { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; }
+td .ids { font-family: var(--font-mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.badge1 { color: var(--muted); font-size: 12px; }
+.empty { border: 1px dashed var(--line); border-radius: 6px; padding: 28px 20px; color: var(--muted); text-align: center; background: var(--surface); }
+.empty b { color: var(--ink); display: block; margin-bottom: 4px; font-weight: 600; }
+
+.entry { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 20px; padding: 16px 0; border-top: 1px solid var(--line); }
+.entry:first-child { border-top: 0; }
+.entry time { font-family: var(--font-mono); font-size: 13px; color: var(--muted); padding-top: 2px; }
+.entry p { margin-top: 4px; white-space: pre-wrap; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+.todo-row { display: flex; gap: 12px; align-items: baseline; padding: 11px 0; border-top: 1px solid var(--line); }
+.todo-row:first-child { border-top: 0; }
+.todo-row .t { flex: 1; min-width: 0; }
+.todo-row.is-done .t { color: var(--muted); text-decoration: line-through; }
+.addrow { display: flex; gap: 8px; margin-top: 14px; }
+.addrow input { flex: 1; }
+
+.deck { display: grid; gap: 12px; }
+.slide { aspect-ratio: 16 / 9; max-width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: clamp(18px, 4vw, 48px); display: flex; flex-direction: column; gap: 18px; overflow: auto; }
+.slide h3 { font-size: clamp(20px, 3.2vw, 34px); font-weight: 600; }
+.slide ul { margin: 0; padding-left: 1.2em; display: grid; gap: 10px; font-size: clamp(14px, 1.9vw, 21px); line-height: 1.45; }
+.slide .note { margin-top: auto; color: var(--muted); font-size: 13px; }
+.deckbar { display: flex; align-items: center; gap: 10px; }
+.deckbar .count { font-family: var(--font-mono); font-size: 13px; color: var(--muted); margin-right: auto; }
+.foot { margin-top: 36px; color: var(--muted); font-size: 13px; }
+@media (max-width: 560px) {
+  .entry { grid-template-columns: 1fr; }
+  nav { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) { section { animation: in .18s ease-out; } @keyframes in { from { opacity: .4; } to { opacity: 1; } } }
+</style>
+
+<div class="bar"><div class="bar-in">
+  <div class="brand"><b>CLFB</b><span>Continual learning with Behavioral Foundation Models</span></div>
+  <nav id="nav" aria-label="Sections">
+    <a href="#overview" data-r="overview">Overview</a>
+    <a href="#experiments" data-r="experiments">Experiments</a>
+    <a href="#results" data-r="results">Results</a>
+    <a href="#updates" data-r="updates">Updates</a>
+    <a href="#next" data-r="next">Next</a>
+    <a href="#slides" data-r="slides">Slides</a>
+  </nav>
+</div></div>
+
+<main>
+<section id="overview" hidden>
+  <div class="head"><div><h2>Overview</h2><p>Reward encoding in a pretrained forward-backward (FB) model, one task after another, at fixed rank.</p></div></div>
+  <div class="stack">
+    <div class="panel">
+      <span class="label">Question</span>
+      <p>An FB model represents a family of rewards through a latent <code>z</code> and a backward embedding <code>B</code>. When new reward tasks arrive in a stream, can the model keep encoding them, and keep the latents of earlier tasks valid, without growing the rank or forgetting?</p>
+    </div>
+    <div class="cols">
+      <div class="panel">
+        <span class="label">Setup</span>
+        <dl>
+          <dt>model</dt><dd>classical FB (actor in the bootstrap) + DDPG actor, loaded from a pretrained checkpoint</dd>
+          <dt>stream</dt><dd>ordered eval tasks of one environment, for example walker: walk, then run</dd>
+          <dt>stage k</dt><dd>one task; <code>steps_per_stage</code> updates against a frozen <code>θ_old = θ_(k-1)</code></dd>
+          <dt>data</dt><dd>full offline dataset, plus a labeled set <code>D_k</code> of 10k states for the current task</dd>
+        </dl>
+      </div>
+      <div class="panel">
+        <span class="label">Environments</span>
+        <dl>
+          <dt>cheetah</dt><dd>vel10Back, vel2Back, vel2, vel10, flip</dd>
+          <dt>walker</dt><dd>stand, walk, vel8, run, flip</dd>
+          <dt>quadruped</dt><dd>stand, walk, run, jump</dd>
+          <dt>maze</dt><dd>pointmaze and antmaze goal tasks</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="panel">
+      <span class="label">Stage objective</span>
+<div class="eq">L_k = L_FB + λ · L_rec(r_k) + μ_B · R^B + μ_Q · R^Q</div>
+      <div class="cols" style="margin-top:16px">
+        <div><h3>L_rec</h3><p>Regression of the normalized reward on <code>B_θ</code> over the labeled set, with detached coefficients. Optional cross-fitting.</p></div>
+        <div><h3>R^B</h3><p>Retention in latent space. Closed form of <code>E_(z~ν)[ zᵀMz / zᵀΣ_old⁻¹z ]</code> with <code>M = Σ_old⁻¹ − TᵀΣ_θ⁻¹T</code> and <code>T = AΣ_old⁻¹</code>.</p></div>
+        <div><h3>R^Q</h3><p>Value matching between the old and new model on the re-encoded old family, <code>z' = sg(Tz)</code>, head by head.</p></div>
+      </div>
+      <p style="margin-top:16px;color:var(--muted)"><code>ν</code> mixes the uniform sphere with the stored atoms <code>z̄_j</code> (weight <code>α</code>). At the end of a stage the stored latents are carried forward, <code>z_j ← T z_j</code>, and the new one is <code>z_k = mean_i r̄_k(s_i) B_θk(s_i)</code>. Only d numbers per task are kept.</p>
+    </div>
+    <div class="cols">
+      <div class="panel">
+        <span class="label">Hyperparameters</span>
+        <dl>
+          <dt>lam</dt><dd>weight of L_rec (1.0)</dd>
+          <dt>mu_b, mu_q</dt><dd>weights of R^B (1.0) and R^Q (0.01)</dd>
+          <dt>alpha</dt><dd>atom weight in ν (0.5)</dd>
+          <dt>n_labeled</dt><dd>size of D_k (10000)</dd>
+          <dt>steps_per_stage</dt><dd>updates per stage (100000)</dd>
+          <dt>bc_coef</dt><dd>TD3+BC weight of the actor (0)</dd>
+        </dl>
+      </div>
+      <div class="panel">
+        <span class="label">Metrics logged</span>
+        <ul class="plain">
+          <li><b>fresh</b>: zero-shot, z inferred from fresh labels</li>
+          <li><b>tracked</b>: z carried through the T's</li>
+          <li><b>eps</b>: share of reward energy not explained by B on held-out states</li>
+          <li><b>z_shrink</b>: mean ‖Tz‖ / ‖z‖</li>
+          <li><b>rew_corr</b>: correlation of the encoded and true reward</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel">
+      <span class="label">Where things live</span>
+      <dl>
+        <dt>fb_continual.py</dt><dd>training and evaluation</dd>
+        <dt>logs/&lt;run&gt;/</dt><dd><code>training_log.csv</code> per chunk, <code>eval_log.csv</code> per evaluation</dd>
+        <dt>models/&lt;run&gt;/</dt><dd>checkpoints of each run</dd>
+        <dt>saved_models/</dt><dd>pretrained FB checkpoints (cheetah, walker)</dd>
+        <dt>HPC</dt><dd>all experiments run on the cluster; results are added here from its logs</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section id="experiments" hidden>
+  <div class="head">
+    <div><h2>Experiments</h2><p>Runs launched on Jean Zay from <code>scripts/</code>. Status comes from Slurm.</p></div>
+    <div class="tools">
+      <label class="label" for="expFilter">Status</label>
+      <select id="expFilter">
+        <option value="all">All</option><option value="pending">Pending</option><option value="running">Running</option><option value="finished">Finished</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+  </div>
+  <div class="counts" id="expCounts"></div>
+  <div id="expOut"></div>
+  <details class="other" id="otherBox">
+    <summary><span id="otherTitle">Other jobs</span></summary>
+    <div id="otherOut"></div>
+  </details>
+  <p class="asof" id="asof"></p>
+</section>
+
+<section id="results" hidden>
+  <div class="head"><div><h2>Results</h2><p>Finished runs grouped by family and configuration. Repeats of one configuration are averaged.</p></div></div>
+  <p class="note" id="resNote">The ± is the standard deviation across runs when a configuration has several, and the rollout standard deviation of the single run otherwise (marked "1 run").</p>
+  <div class="stack" id="resOut"></div>
+</section>
+
+<section id="updates" hidden>
+  <div class="head"><div><h2>Updates</h2><p>What we tried, what we found, what we decided. Newest first.</p></div></div>
+  <div class="panel" id="updOut"></div>
+</section>
+
+<section id="next" hidden>
+  <div class="head"><div><h2>Next</h2><p>Open questions and things to do.</p></div></div>
+  <div class="panel">
+    <div id="todoOut"></div>
+    <form class="addrow" id="todoForm" hidden>
+      <input type="text" id="todoText" placeholder="Add an item" aria-label="New item">
+      <button class="primary" type="submit">Add</button>
+    </form>
+  </div>
+</section>
+
+<section id="slides" hidden>
+  <div class="head"><div><h2>Slides</h2><p>Progress deck. Use the arrow keys or the buttons.</p></div></div>
+  <div class="deck" id="deckOut"></div>
+</section>
+
+<p class="foot" id="foot"></p>
+</main>
+
+<script>
+(function () {
+  var ROUTES = ["overview", "experiments", "results", "updates", "next", "slides"];
+  var data = { jobs: [], meta: null, tracking: {}, families: {}, updates: [], todos: [], slides: [] };
+  var loaded = { jobs: false, tracking: false, families: false, updates: false, todos: false, slides: false };
+  var db = null, canWrite = false, deckIdx = 0;
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function pill(status) { return el("span", "pill " + status, status); }
+  function empty(title, body) { var d = el("div", "empty"); d.appendChild(el("b", null, title)); d.appendChild(document.createTextNode(body)); return d; }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+  function byDateDesc(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }
+
+  function route() {
+    var r = (location.hash || "").replace("#", "");
+    if (ROUTES.indexOf(r) < 0) r = "overview";
+    ROUTES.forEach(function (n) { $(n).hidden = n !== r; });
+    Array.prototype.forEach.call(document.querySelectorAll("nav a"), function (a) {
+      if (a.dataset.r === r) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  }
+
+  var STATUS_ORDER = { running: 0, pending: 1, failed: 2, finished: 3, cancelled: 4 };
+  function jobTime(j) { return String(j.submit || j.start || ""); }
+  function fmtTime(t) { return t && t !== "Unknown" ? t.replace("T", " ").slice(0, 16) : ""; }
+  function jobLabel(j) { return j.arrayJob ? j.arrayJob + "_" + j.arrayIndex : j.jobId; }
+
+  function jobsTable(rows, tracked) {
+    var box = el("div", "tablebox"), t = el("table"), thead = el("thead"), hr = el("tr");
+    (tracked ? ["Experiment", "Status", "Command and folders", "Result", "Job", "Time"] : ["Job", "Status", "Command", "Time", ""]).forEach(function (h) { hr.appendChild(el("th", null, h)); });
+    thead.appendChild(hr); t.appendChild(thead);
+    var tb = el("tbody");
+    rows.forEach(function (j) {
+      var tr = el("tr"), c = el("td", tracked ? "wide" : null);
+      if (tracked) {
+        c.appendChild(el("div", null, j.title || j.script));
+        if (j.description) c.appendChild(el("div", "sub", j.description));
+        tr.appendChild(c);
+      } else {
+        c.appendChild(el("div", "mono", jobLabel(j))); c.appendChild(el("div", "sub", j.script));
+        tr.appendChild(c);
+      }
+      var cs = el("td"); cs.appendChild(pill(j.status || "pending"));
+      if (j.state && j.state !== String(j.status || "").toUpperCase()) cs.appendChild(el("div", "sub mono", j.state));
+      tr.appendChild(cs);
+      var cc = el("td", "wide");
+      if (j.command) cc.appendChild(el("div", "cmd", j.command));
+      if (tracked && j.runFolders && j.runFolders.length) {
+        var fo = el("div", "folders"); fo.style.marginTop = "6px";
+        j.runFolders.forEach(function (f) { fo.appendChild(el("span", null, "logs/" + f)); });
+        cc.appendChild(fo);
+      }
+      if (j.status === "failed" && j.err) cc.appendChild(el("div", "errtxt", j.err));
+      if (j.status === "running" && j.lastLine) cc.appendChild(el("div", "sub mono", j.lastLine));
+      tr.appendChild(cc);
+      if (tracked) {
+        var cr = el("td");
+        if (j.results && j.results.text) {
+          cr.appendChild(el("div", "mono", j.results.text));
+          if (j.results.extra) cr.appendChild(el("div", "sub mono", j.results.extra));
+        } else if (j.status === "finished") cr.appendChild(el("div", "sub", "no eval log yet"));
+        tr.appendChild(cr);
+        var cj = el("td"); cj.appendChild(el("div", "mono", jobLabel(j))); cj.appendChild(el("div", "sub", j.script)); tr.appendChild(cj);
+      }
+      var ct = el("td", "mono"); ct.appendChild(el("div", null, fmtTime(j.start || j.submit)));
+      ct.appendChild(el("div", "sub", j.elapsed || "")); tr.appendChild(ct);
+      if (!tracked) {
+        var ca = el("td");
+        if (canWrite) {
+          var b = el("button", null, "Track");
+          b.addEventListener("click", function () { db.collection("tracking").doc(j.id).set({ tracked: true, title: j.title || "", description: j.description || "" }).catch(function () {}); });
+          ca.appendChild(b);
+        }
+        tr.appendChild(ca);
+      }
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); box.appendChild(t); return box;
+  }
+
+  function renderExperiments() {
+    var out = $("expOut"), oth = $("otherOut"), cnt = $("expCounts"); clear(out); clear(oth); clear(cnt);
+    var f = $("expFilter").value;
+    var all = data.jobs.map(function (j) {
+      var t = data.tracking[j.jobId] || {};
+      return Object.assign({}, j, { id: j.jobId, tracked: !!t.tracked, title: t.title || "", description: t.description || "", family: t.family || "", variant: t.variant || "", order: t.order || 0 });
+    });
+    var counts = {};
+    all.forEach(function (j) { counts[j.status] = (counts[j.status] || 0) + 1; });
+    Object.keys(STATUS_ORDER).forEach(function (k) { if (counts[k]) cnt.appendChild(el("span", "pill " + k, counts[k] + " " + k)); });
+    function keep(j) { return f === "all" || j.status === f; }
+    function sorter(a, b) { return (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || jobTime(b).localeCompare(jobTime(a)); }
+    var tracked = all.filter(function (j) { return j.tracked && keep(j); }).sort(sorter);
+    var others = all.filter(function (j) { return !j.tracked && keep(j); }).sort(function (a, b) { return jobTime(b).localeCompare(jobTime(a)); });
+    if (!tracked.length) {
+      out.appendChild(loaded.jobs && !all.length
+        ? empty("No jobs yet", "Jobs launched from scripts/ appear here once the status check has run.")
+        : empty(loaded.jobs ? "No tracked experiment here" : "Loading", loaded.jobs ? "Experiments you ask to track show up in this table. Everything else is listed under Other jobs." : ""));
+    } else out.appendChild(jobsTable(tracked, true));
+    $("otherTitle").textContent = "Other jobs (" + others.length + ")";
+    if (others.length) oth.appendChild(jobsTable(others, false));
+    var m = data.meta;
+    $("asof").textContent = m && m.checkedAt ? "Slurm status as of " + m.checkedAt.replace("T", " ").replace("Z", " UTC") : "";
+  }
+
+  function stats(a) {
+    var n = a.length, m = a.reduce(function (x, y) { return x + y; }, 0) / n;
+    var sd = n > 1 ? Math.sqrt(a.reduce(function (x, y) { return x + (y - m) * (y - m); }, 0) / (n - 1)) : null;
+    return { n: n, m: m, sd: sd };
+  }
+  function pm(st, fallbackSd) {
+    var sd = st.sd != null ? st.sd : fallbackSd;
+    return st.m.toFixed(1) + (sd != null ? " ± " + sd.toFixed(1) : "");
+  }
+
+  function renderResults() {
+    var out = $("resOut"); clear(out);
+    var jobs = data.jobs.map(function (j) {
+      var t = data.tracking[j.jobId] || {};
+      return Object.assign({}, j, { tracked: !!t.tracked, family: t.family || "", variant: t.variant || "", order: t.order || 0 });
+    }).filter(function (j) { return j.tracked && j.status === "finished" && j.results && j.family; });
+    if (!jobs.length) {
+      out.appendChild(empty(loaded.jobs ? "No finished results yet" : "Loading", loaded.jobs ? "Finished tracked runs with an evaluation log appear here, grouped by family." : ""));
+      return;
+    }
+    var fams = {};
+    jobs.forEach(function (j) { (fams[j.family] = fams[j.family] || []).push(j); });
+    Object.keys(fams).sort(function (a, b) { return ((data.families[a] || {}).order || 99) - ((data.families[b] || {}).order || 99); }).forEach(function (fk) {
+      var info = data.families[fk] || {}, panel = el("div", "panel fam");
+      panel.appendChild(el("h3", null, info.title || fk));
+      if (info.description) panel.appendChild(el("p", null, info.description));
+      var groups = {};
+      fams[fk].forEach(function (j) { (groups[j.variant] = groups[j.variant] || { order: j.order, jobs: [] }).jobs.push(j); });
+      var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
+      ["Configuration", "Runs", "Final return", "Best during run", "Start", "Jobs"].forEach(function (h) { hr.appendChild(el("th", null, h)); });
+      var th = el("thead"); th.appendChild(hr); t.appendChild(th);
+      var tb = el("tbody");
+      Object.keys(groups).sort(function (a, b) { return groups[a].order - groups[b].order; }).forEach(function (vk) {
+        var g = groups[vk].jobs, tr = el("tr");
+        var fin = stats(g.map(function (j) { return j.results.final; }));
+        var best = stats(g.map(function (j) { return j.results.best; }));
+        var starts = g.filter(function (j) { return j.results.start != null; }).map(function (j) { return j.results.start; });
+        tr.appendChild(el("td", null, vk));
+        var cn = el("td", "mono", String(fin.n)); if (fin.n === 1) cn.textContent = "1 run"; tr.appendChild(cn);
+        var cf = el("td", "pm", pm(fin, g[0].results.std));
+        if (fin.n === 1) cf.appendChild(el("span", "badge1", " (rollouts)"));
+        tr.appendChild(cf);
+        tr.appendChild(el("td", "pm", pm(best, null)));
+        tr.appendChild(el("td", "pm", starts.length ? pm(stats(starts), null) : "none"));
+        tr.appendChild(el("td", "ids", g.map(function (j) { return j.jobId; }).join(", ")));
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); box.appendChild(t); panel.appendChild(box); out.appendChild(panel);
+    });
+  }
+
+  function renderUpdates() {
+    var out = $("updOut"); clear(out);
+    var rows = data.updates.slice().sort(byDateDesc);
+    if (!rows.length) { out.appendChild(empty("No updates yet", "Each work session adds a short dated entry here.")); return; }
+    rows.forEach(function (u) {
+      var e = el("div", "entry");
+      e.appendChild(el("time", null, u.date || ""));
+      var b = el("div"); b.appendChild(el("h3", null, u.title || "")); b.appendChild(el("p", null, u.body || ""));
+      if (u.tags && u.tags.length) { var tg = el("div", "tags"); u.tags.forEach(function (s) { tg.appendChild(el("span", "pill", s)); }); b.appendChild(tg); }
+      e.appendChild(b); out.appendChild(e);
+    });
+  }
+
+  var NEXT = { todo: "running", running: "done", done: "todo" };
+  function renderTodos() {
+    var out = $("todoOut"); clear(out);
+    var order = { running: 0, todo: 1, done: 2 };
+    var rows = data.todos.slice().sort(function (a, b) { return (order[a.status] - order[b.status]) || String(a.created || "").localeCompare(String(b.created || "")); });
+    if (!rows.length) out.appendChild(empty("Nothing queued", "Open questions and next steps will be listed here."));
+    rows.forEach(function (x) {
+      var r = el("div", "todo-row" + (x.status === "done" ? " is-done" : ""));
+      r.appendChild(el("div", "t", x.text || ""));
+      if (canWrite) {
+        var b = el("button", null, x.status || "todo"); b.title = "Change status";
+        b.addEventListener("click", function () { db.collection("todos").doc(x.id).update({ status: NEXT[x.status] || "todo" }).catch(function () {}); });
+        r.appendChild(b);
+      } else r.appendChild(pill(x.status || "todo"));
+      out.appendChild(r);
+    });
+    $("todoForm").hidden = !canWrite;
+  }
+
+  function renderDeck() {
+    var out = $("deckOut"); clear(out);
+    var rows = data.slides.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    if (!rows.length) { out.appendChild(empty("No slides yet", "The progress deck will be built here from the experiments and updates.")); return; }
+    if (deckIdx >= rows.length) deckIdx = rows.length - 1;
+    var s = rows[deckIdx], sl = el("div", "slide");
+    sl.appendChild(el("h3", null, s.title || ""));
+    if (s.bullets && s.bullets.length) { var ul = el("ul"); s.bullets.forEach(function (t) { ul.appendChild(el("li", null, t)); }); sl.appendChild(ul); }
+    if (s.note) sl.appendChild(el("div", "note", s.note));
+    out.appendChild(sl);
+    var bar = el("div", "deckbar"); bar.appendChild(el("span", "count", (deckIdx + 1) + " / " + rows.length));
+    var p = el("button", null, "Previous"), n = el("button", null, "Next");
+    p.disabled = deckIdx === 0; n.disabled = deckIdx === rows.length - 1;
+    p.addEventListener("click", function () { deckIdx--; renderDeck(); });
+    n.addEventListener("click", function () { deckIdx++; renderDeck(); });
+    bar.appendChild(p); bar.appendChild(n); out.appendChild(bar);
+  }
+
+  function renderAll() { renderExperiments(); renderResults(); renderUpdates(); renderTodos(); renderDeck(); }
+
+  function watch(coll, key) {
+    db.collection(coll).onSnapshot(function (snap) {
+      data[key] = snap.docs.map(function (d) { var v = d.data() || {}; v.id = d.id; return v; });
+      loaded[key] = true; renderAll();
+    }, function () { loaded[key] = true; renderAll(); });
+  }
+
+  $("expFilter").addEventListener("change", renderExperiments);
+  $("todoForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = $("todoText").value.trim();
+    if (!v || !db) return;
+    db.collection("todos").add({ text: v, status: "todo", created: new Date().toISOString() }).then(function () { $("todoText").value = ""; }).catch(function () {});
+  });
+  document.addEventListener("keydown", function (e) {
+    if (location.hash !== "#slides" || /INPUT|TEXTAREA|SELECT/.test((e.target || {}).tagName || "")) return;
+    var n = data.slides.length;
+    if (e.key === "ArrowRight" && deckIdx < n - 1) { deckIdx++; renderDeck(); }
+    if (e.key === "ArrowLeft" && deckIdx > 0) { deckIdx--; renderDeck(); }
+  });
+  window.addEventListener("hashchange", route);
+  route(); renderAll();
+
+  if (window.claude && claude.use) {
+    claude.use("db").then(function (d) {
+      if (!d) { $("foot").textContent = "Live data is unavailable in this view."; return; }
+      db = d;
+      claude.use("user").then(function (u) { canWrite = !!(u && u.can && u.can("data.write") !== false && u.canEdit && u.canEdit()); renderTodos(); renderExperiments(); }).catch(function () {});
+      db.doc("snapshot/jobs").onSnapshot(function (snap) {
+        var v = snap.exists ? (snap.data() || {}) : {};
+        data.jobs = Object.keys(v.jobs || {}).map(function (k) { return v.jobs[k]; });
+        data.meta = { checkedAt: v.checkedAt };
+        loaded.jobs = true; renderAll();
+      }, function () { loaded.jobs = true; renderAll(); });
+      db.collection("families").onSnapshot(function (snap) {
+        data.families = {};
+        snap.docs.forEach(function (d) { data.families[d.id] = d.data() || {}; });
+        loaded.families = true; renderAll();
+      }, function () { loaded.families = true; renderAll(); });
+      db.collection("tracking").onSnapshot(function (snap) {
+        data.tracking = {};
+        snap.docs.forEach(function (d) { data.tracking[d.id] = d.data() || {}; });
+        loaded.tracking = true; renderAll();
+      }, function () { loaded.tracking = true; renderAll(); }); watch("updates", "updates"); watch("todos", "todos"); watch("slides", "slides");
+    });
+  }
+})();
+</script>

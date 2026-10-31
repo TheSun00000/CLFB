@@ -9,4 +9,5 @@ saved_models
 shared
 baselines
 csv_files
-diag_results
+diag_resultshpc
+hpc

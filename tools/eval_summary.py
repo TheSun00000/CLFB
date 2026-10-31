@@ -73,8 +73,8 @@ def avg(key):
         v = [r['values'][t] for r in doc['rows'] if r['name'] in trained + [n + ' [random latent]' for n in trained] and r['random'] == (key == 'random') and t in r['values']]
         if v: out[t] = round(st.mean(v), 1)
     return out
-doc['control'] = {'groups': [cfg('pretrained model', 'Pretrained model (no fine-tuning)'), cfg('lam 100, focus 1.0, noise 0.2', 'Base run: fine-tuned on run (mean of 4 runs)'),
-                             {'label': 'All %d fine-tuned settings (mean)' % len(trained), 'runs': len(trained), 'fresh': avg('fresh'), 'random': avg('random')}]}
+doc['control'] = {'groups': [cfg('pretrained model', 'Pretrained model (no fine-tuning)'), cfg('lam 100, focus 1.0, noise 0.2', 'Base run: fine-tuned on run (mean of 4 runs)')
+                             ]}
 with open('hpc/status/eval_all_tasks.json', 'w') as f:
     json.dump(doc, f)
 print('%-62s %4s ' % ('configuration', 'runs') + ' '.join('%7s' % t[:7] for t in tasks))

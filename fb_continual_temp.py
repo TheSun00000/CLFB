@@ -9,6 +9,11 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
     rec_prefit=0      1 (continual mode): at the start of the stage, run fit_backward_to_reward (B alone, fixed readout, rfit_* flags) before the
                          joint training; an evaluation tagged 'prefit' is logged at step 0 afterwards. Tests whether the joint objective keeps the fit.
     eval_rollouts=1   0: no rollouts in the evaluations (returns are NaN), only the reward-reconstruction columns: much faster evals.
+    eval_stream_only=0  1: the fresh zero-shot evaluation (rollouts and reward-reconstruction stats) covers only the tasks of the stream, not
+                         all the benchmark tasks of the env (the other columns are left empty): 5x fewer environments per evaluation.
+    ztask_bs=0        >0: the task latent z_k of z_task_frac / actor_z_task_frac is re-encoded at every step on a random minibatch of this many
+                         states of D_k (0 = the whole labeled set, as before; with 100k labels the whole set at every step is very slow).
+    num_evals         default 20 in this script (5 in fb_continual.py): episodes per task and evaluation.
     b_cosine=0        1: cosine decay of the lr of B over steps_per_stage (Adam is re-initialised at every stage). E3 phase 1 does this.
   Existing flags that also matter for this question: lam, n_est, n_labeled, cross_fit, and fb_objective=0 ortho_coef=0
   (then B receives gradient from L_rec only: the Q loss uses a stop-gradient B).
@@ -245,6 +250,7 @@ if __name__ == '__main__':
     EVAL_N          = 10_000      # number of states for the eval-time reward / reconstruction statistics
     EVAL_FRESH      = bool(int(kwargs['eval_fresh'])) if 'eval_fresh' in kwargs else True
     EVAL_ROLLOUTS   = bool(int(kwargs['eval_rollouts'])) if 'eval_rollouts' in kwargs else True
+    EVAL_STREAM_ONLY = bool(int(kwargs['eval_stream_only'])) if 'eval_stream_only' in kwargs else False
     REC_PREFIT      = bool(int(kwargs['rec_prefit'])) if 'rec_prefit' in kwargs else False
 
     # ── Single-task fine-tuning ───────────────────────────────────────────────────
@@ -633,7 +639,7 @@ if __name__ == '__main__':
             return state
 
     N_BENCH   = len(benchmarks)
-    NUM_EVALS = int(kwargs['num_evals']) if 'num_evals' in kwargs else 5
+    NUM_EVALS = int(kwargs['num_evals']) if 'num_evals' in kwargs else 20
     print(NUM_TRAJECTORIES, TRAJECTORY_LEN, NUM_TRAJECTORIES * TRAJECTORY_LEN)
 
     # ── The stream of tasks ───────────────────────────────────────────────────────
@@ -646,6 +652,7 @@ if __name__ == '__main__':
     BATCH_SIZE = 1024
     # Number of benchmarks rolled out in parallel during eval (each one needs NUM_EVALS env instances)
     EVAL_CHUNK = int(kwargs['eval_chunk']) if 'eval_chunk' in kwargs else N_BENCH
+    EVAL_BENCH = list(TASK_IDX) if EVAL_STREAM_ONLY else list(range(N_BENCH))      # benchmark tasks of the fresh evaluation
 
     EVAL_FIELDS = (["stage", "step", "tag", "mean_fresh_all", "mean_fresh_tasks", "mean_tracked_tasks"]
                    + [f"{label}_fresh_{s}" for label in LABELS for s in ("mean", "std", "rew_corr", "eps")]
@@ -824,6 +831,7 @@ if __name__ == '__main__':
         b_decay_steps:       int   = 0        # >0: cosine decay of the lr of B over this many updates (set by b_cosine=1)
         # --- latent of the current task inside the FB / actor loss (0 = off = original behaviour) ---
         z_task_frac:         float = 0.0      # fraction of the z of L_FB and of the actor loss replaced by the latent of the current task
+        ztask_bs:            int   = 0        # >0: z_k re-encoded on a minibatch of D_k of this size at every step (0 = the whole set)
         z_task_spread:       float = 0.5      # angular noise around that latent (0 = exactly the latent; 1 = 45 degrees)
         actor_z_task_frac:   float = -1.0     # fraction of the ACTOR's z that is the task latent (-1 = same as z_task_frac)
         freeze_fb:           bool  = False    # diagnostic: do not update F and B, only the actor
@@ -1029,9 +1037,14 @@ if __name__ == '__main__':
                 if cfg.freeze_b:
                     z_cur = sd.z_run                                                         # computed once at the start of the stage
                 else:
+                    if cfg.ztask_bs > 0:
+                        idx_z = jax.random.randint(jax.random.fold_in(random_key, 11), (cfg.ztask_bs,), 0, sd.lab_obs.shape[0])
+                        lab_obs_z, lab_r_z = sd.lab_obs[idx_z], sd.lab_r[idx_z]
+                    else:
+                        lab_obs_z, lab_r_z = sd.lab_obs, sd.lab_r
                     B_lab_sg = jax.lax.stop_gradient(
-                        self.backward_net.apply({'params': ts.fb_params['backward']}, sd.lab_obs))
-                    z_cur    = (sd.lab_r[:, None] * B_lab_sg).mean(axis=0)                   # [d] re-encoded with the current B
+                        self.backward_net.apply({'params': ts.fb_params['backward']}, lab_obs_z))
+                    z_cur    = (lab_r_z[:, None] * B_lab_sg).mean(axis=0)                    # [d] re-encoded with the current B
                 noise    = normalize(jax.random.normal(k_tz1, (bs, d)))
                 z_task   = math.sqrt(d) * normalize(normalize(z_cur)[None, :] + cfg.z_task_spread * noise)
                 u_task   = jax.random.uniform(k_tz2, (bs, 1))
@@ -1231,7 +1244,7 @@ if __name__ == '__main__':
                      ('lr', float), ('lr_coef', float), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
-                     ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float)):
+                     ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
         if _k in kwargs:
             fb_config = dataclasses.replace(fb_config, **{_k: _typ(kwargs[_k])})
     if 'target_agg' in kwargs:
@@ -1508,7 +1521,7 @@ if __name__ == '__main__':
         backward_params = ts.fb_params['backward']
         items, stats = [], {}
 
-        for b in (range(N_BENCH) if EVAL_FRESH else []):
+        for b in (EVAL_BENCH if EVAL_FRESH else []):
             reward_fn, label, param = benchmarks[b]
             zs = []
             for _ in range(NUM_EVALS):
@@ -1549,7 +1562,7 @@ if __name__ == '__main__':
             fit_eps, fit_corr = ft_reward_quality(backward_params, fit_b, fit_w, fit_m2)
             row.update({f'{fit_label}_fit_eps': fit_eps, f'{fit_label}_fit_rew_corr': fit_corr})
         fresh_means = np.full(N_BENCH, np.nan)
-        for b, label in (enumerate(LABELS) if EVAL_FRESH else []):
+        for b, label in ([(b, LABELS[b]) for b in EVAL_BENCH] if EVAL_FRESH else []):
             m, s = returns[('fresh', b)]
             eps, corr = stats[('fresh', b)]
             row.update({f'{label}_fresh_mean': m, f'{label}_fresh_std': s, f'{label}_fresh_rew_corr': corr, f'{label}_fresh_eps': eps})
@@ -1647,6 +1660,8 @@ if __name__ == '__main__':
         fit_info = (task_idx, task, stage_data.w_fit, m2_k) if FINETUNE == 'none' else None   # fixed-readout quality of B on this task
         if FINETUNE == 'none' and REC_PREFIT:
             train_state = fit_backward_to_reward(train_state, stage_data, task_idx, m2_k)
+            stage_data = stage_data.replace(      # latent of the task with the fitted B (used when freeze_b=1)
+                z_run=jnp.mean(stage_data.lab_r[:, None] * backward_apply(train_state.fb_params['backward'], stage_data.lab_obs), axis=0))
             run_eval(train_state, k, 0, 'prefit', [], [], None, fit_info)
         if FINETUNE != 'none':
             if FINETUNE == 'reward_critic':

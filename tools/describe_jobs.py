@@ -177,8 +177,57 @@ def fb_class(cmd):
     return fb_variant(cmd), order, '|'.join(x[0] for x in m), '|'.join(x[1] for x in m), False
 
 
+def is_ret(cmd):
+    """Round 4 (scripts/a100_dev_return.sh): the policy is pointed at the task (z_task_frac), return from fresh labels, stream-only evaluation."""
+    return 'fb_continual_temp.py' in cmd and flag(cmd, 'eval_stream_only') == '1'
+
+
+def ret_parts(cmd):
+    lam, ztf, atf = flag(cmd, 'lam', '1'), flag(cmd, 'z_task_frac', '0'), flag(cmd, 'actor_z_task_frac')
+    sp = flag(cmd, 'z_task_spread', '0.5')
+    ex = []
+    if atf not in (None, '-1', ztf): ex.append('actor focus %s' % atf)
+    if flag(cmd, 'mix_ratio') == '0': ex.append('no B(s) latents')
+    if flag(cmd, 'q_loss_coef'): ex.append('Q loss %s' % flag(cmd, 'q_loss_coef'))
+    if flag(cmd, 'fb_objective') == '0': ex.append('Q loss only, no L_FB')
+    if flag(cmd, 'rec_prefit') == '1' and flag(cmd, 'freeze_b') == '1': ex.append('prefit, B frozen')
+    return lam, ztf, sp, ex
+
+
+def ret_variant(cmd):
+    lam, ztf, sp, ex = ret_parts(cmd)
+    return ', '.join(['lam %s' % lam, 'focus %s' % ztf] + (['noise %s' % sp] if ztf != '0' or ex else []) + ex)
+
+
+def ret_class(cmd):
+    """(variant, order, panels, series, False). A panel holds at most 5 lines; the base run (lam 100, focus 1, noise 0.2) is in all of them."""
+    lam, ztf, sp, ex = ret_parts(cmd)
+    L, base = float(lam), (float(lam) == 100 and ztf == '1.0' and sp == '0.2' and not ex)
+    m = []
+    if not ex and L == 100 and (sp == '0.2' or ztf == '0'):
+        name = {'0': 'uniform z (no focus)', '0.5': 'focus 0.5', '0.8': 'focus 0.8', '1.0': 'focus 1.0'}.get(ztf)
+        if name: m.append(('task focus', name))
+    if not ex and L == 0 and ztf == '0.5': m.append(('task focus', 'focus 0.5, no L_rec'))
+    if not ex and L == 100 and ztf == '1.0': m.append(('noise around the latent', 'noise %s' % sp))
+    if base:
+        m += [('who sees the task latent', 'F and actor, focus 1.0'), ('is L_rec needed', 'lam 100'), ('critic objective', 'default (L_FB + Q loss 0.01)')]
+    if not ex and L == 100 and ztf == '0.5' and sp == '0.2': m.append(('who sees the task latent', 'F and actor, focus 0.5'))
+    if ex == ['actor focus 1.0'] and L == 100:
+        m.append(('who sees the task latent', 'actor only, F half-focused' if ztf == '0.5' else 'actor only, F uniform'))
+    if ex == ['no B(s) latents']: m.append(('who sees the task latent', 'F without B(s) latents'))
+    if not ex and ztf == '1.0' and sp == '0.2' and L in (0, 30, 300): m.append(('is L_rec needed', 'lam %d%s' % (L, ' (no L_rec)' if L == 0 else '')))
+    if ex and ex[0] in ('Q loss 0.1', 'Q loss 1.0'): m.append(('critic objective', ex[0]))
+    if ex == ['Q loss only, no L_FB']: m.append(('critic objective', 'Q loss only (no L_FB)'))
+    if ex == ['prefit, B frozen']: m.append(('critic objective', 'B-only prefit, then B frozen'))
+    if not m: m = [('', ret_variant(cmd))]
+    order = 1 + int(L // 10) + int(float(ztf) * 10) + 40 * len(ex)
+    return ret_variant(cmd), order, '|'.join(x[0] for x in m), '|'.join(x[1] for x in m), False
+
+
 def lrec_class(cmd):
     """(variant, order, panel, series, is_reference) for fb_continual_temp.py runs."""
+    if is_ret(cmd):
+        return ret_class(cmd)
     if is_fb(cmd):
         return fb_class(cmd)
     if is_free(cmd):
@@ -198,11 +247,15 @@ def describe(j):
     arr = j['arrayJob'] or j['jobId']
     tail = ''
     if 'fb_continual_temp.py' in cmd:
-        v = fb_variant(cmd) if is_fb(cmd) else (free_variant(cmd) if is_free(cmd) else lrec_round1(cmd))
-        title = 'L_rec vs E3 phase 1: %s' % v
+        v = ret_variant(cmd) if is_ret(cmd) else (fb_variant(cmd) if is_fb(cmd) else (free_variant(cmd) if is_free(cmd) else lrec_round1(cmd)))
+        title = ('Return with task focus: %s' if is_ret(cmd) else 'L_rec vs E3 phase 1: %s') % v
         desc = ('Which differences between L_rec (continual) and fit_backward_to_reward (E3 phase 1) make B regress onto the reward as well? '
                 'Run of fb_continual_temp.py on walker %s, %s labeled states, variant: %s. ' % (flag(cmd, 'tasks'), flag(cmd, 'n_labeled'), v))
-        if is_fb(cmd):
+        if is_ret(cmd):
+            desc += ('The policy is pointed at the task: %s of the z of L_FB and of the actor loss are the current task latent (angular noise %s), the rest uniform. '
+                     'Return = zero-shot with the latent inferred from fresh labels, every 10k updates, 20 episodes. L_FB and ortho on, lam %s, E3-like L_rec, %s updates.'
+                     % (flag(cmd, 'z_task_frac', '0'), flag(cmd, 'z_task_spread', '0.5'), flag(cmd, 'lam'), flag(cmd, 'steps_per_stage')))
+        elif is_fb(cmd):
             desc += ('L_FB and the ortho term are active, %s updates, F and the actor on uniform z, returns evaluated every 25k updates. Question: how low can the held-out '
                      'eps go while L_FB and ortho stay active, and at what price in orth_l2, fb_loss and return? E3-like L_rec = fixed readout, batch 4096, B lr x3 with cosine decay.'
                      % flag(cmd, 'steps_per_stage'))
@@ -278,7 +331,9 @@ FAMILIES = {
                  'How should a pretrained FB be adapted to one reward with few labels? E1 trains the actor only, E2 the critic with B frozen, E3 first fits B to the reward; R1 and R2 are TD3 from scratch on the same two rewards. Walker run, 1M updates.'),
     'finetune-ablation': ('E3 ablation: warm start, lr, tau', 5,
                           'Why does E3 end below its TD3 reference R2 although both train on the same fitted reward? Walker run, 10k labels, 1M updates.'),
-    'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 0,
+    'return-focus': ('Return with the policy pointed at the task', 0,
+                     "Can the return reach the E3 level (419-438 after 1M updates; TD3 on the same reward 475-485) when F and the actor train partly on the task latent, with L_rec, L_FB and the orthonormality term all active? Walker run, 100k labels, 500k updates."),
+    'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 0.5,
                     "Can L_rec, the reward term of the continual method, fit the reward in B as well as the E3 reference (fit_backward_to_reward) while L_FB and the orthonormality term stay active? Walker run, one stage."),
     'td3-learned': ('Single-reward TD3 with learned rewards', 4,
                     'Walker walk. Offline TD3 on an approximation of the reward (lrec_detach, lrec_full, fixed_z, mlp) instead of the true one; evaluation on the true reward.'),
@@ -286,6 +341,24 @@ FAMILIES = {
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 EXTRA = {
+    'return-focus': {
+        'figures': [
+            {'plot': 'return', 'panel': 'task focus', 'title': 'Does training on the task latent raise the return?',
+             'why': 'Zero-shot return on run, with the latent inferred from fresh labels (higher is better). Focus is the share of the training z replaced by the task latent; 0 is the unfocused run of the previous round. For scale: the pretrained policy is at 340 and E3 reaches 419-438 after 1M updates.'},
+            {'plot': 'eps', 'panel': 'task focus', 'title': 'Does the task focus hurt the reward fit?',
+             'why': 'Held-out error of the reward reconstruction (lower is better; the E3 reference is 0.032). Pointing the policy at the task should not undo what L_rec learned.'},
+            {'plot': 'orth', 'panel': 'task focus', 'title': 'Is B still orthonormal?',
+             'why': 'Orthonormality error of B; the pretrained model is at 0.43 and the previous round stayed at 0.43-0.48.'},
+            {'plot': 'fb', 'panel': 'task focus', 'title': 'Is the FB objective still being optimised?',
+             'why': 'FB loss (lower is better); the previous round ended at -300 to -308.'},
+            {'plot': 'return', 'panel': 'noise around the latent', 'title': 'How much noise around the task latent?',
+             'why': 'Angular noise added to the task latent during training (0 = exactly the latent). Noise spreads the policy over neighbouring latents, which may help it on the latent inferred from fresh labels.'},
+            {'plot': 'return', 'panel': 'who sees the task latent', 'title': 'Does F need the focus, or only the actor?',
+             'why': 'Share of the task latent given to F (through L_FB and the Q loss) and to the actor, and whether F also sees the latents of B(s) of shuffled states.'},
+            {'plot': 'return', 'panel': 'is L_rec needed', 'title': 'Is the reward fit needed for the return?',
+             'why': 'Without L_rec (lam 0) B no longer encodes the reward, so the task latent carries no information about it. Any return gain that disappears here comes from the encoded reward.'},
+            {'plot': 'return', 'panel': 'critic objective', 'title': 'What trains the critic best?',
+             'why': 'The weight of the Q loss next to L_FB, the E3-like critic (Q loss only), and a B fitted first and then frozen. E3 trains the critic on the Q loss alone.'}]},
     'frozen-b': {
         'summary': 'Training F and the actor with B and the task latent frozen gives only a small gain: the return goes from about 340 to 360-370.',
         'figures': [{'plot': 'return', 'panel': '', 'title': 'Return during training',
@@ -335,7 +408,7 @@ def classify(j):
     cmd = j['command'] or ''
     if 'fb_continual_temp.py' in cmd:
         v, order, panel, series, ref = lrec_class(cmd)
-        return 'lrec-vs-fit', v, order, panel, series, ref
+        return ('return-focus' if is_ret(cmd) else 'lrec-vs-fit'), v, order, panel, series, ref
     if 'fb_critic_oracle.py' in cmd:
         real = flag(cmd, 'q_true_reward')
         v = 'true reward' if real == '1' else 'implicit reward'
@@ -392,4 +465,5 @@ fam_docs = {k: {'title': v[0], 'order': v[1], 'description': v[2]} for k, v in F
 for k, extra in EXTRA.items():
     fam_docs[k].update(extra)
 fam_docs['lrec-vs-fit']['table'] = 'eps'
+fam_docs['return-focus']['table'] = 'eps'
 json.dump(fam_docs, open('hpc/status/families.json', 'w'), indent=1)

@@ -35,7 +35,8 @@ OUT = os.path.join(ROOT, 'hpc', 'status')
 JOBS = os.path.join(OUT, 'jobs.json')
 PUSHED = os.path.join(OUT, 'pushed.json')       # hash of the job fields last pushed to the tracker
 SNAPSHOT = os.path.join(OUT, 'snapshot.json')
-CURVES = os.path.join(OUT, 'curves.json')       # content of the tracker's document snapshot/curves
+CURVES = os.path.join(OUT, 'curves.json')       # all the learning curves ({curves: {jobId: curve}}); the tracker holds them in shards
+SHARD_BYTES = 200_000                           # a database document is limited to 262144 bytes of JSON
 
 FINAL = {'COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'OUT_OF_MEMORY', 'NODE_FAIL', 'DEADLINE', 'BOOT_FAIL'}
 ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
@@ -177,6 +178,22 @@ def expand_children(known):
         j['children'] = kids
 
 
+def write_curve_shards(curves):
+    """hpc/status/curves_<n>.json = {curves: {...}} of at most SHARD_BYTES each; the tracker documents are snapshot/curves (n = 0), snapshot/curves_1, ..."""
+    shards, cur = [], {}
+    for r in sorted(curves):
+        if cur and len(json.dumps({'curves': dict(cur, **{r: curves[r]})}, separators=(',', ':'))) > SHARD_BYTES:
+            shards.append(cur)
+            cur = {}
+        cur[r] = curves[r]
+    shards.append(cur)
+    for old in [f for f in os.listdir(OUT) if re.fullmatch(r'curves_\d+\.json', f)]:
+        os.remove(os.path.join(OUT, old))
+    for i, sh in enumerate(shards):
+        with open(os.path.join(OUT, 'curves_%d.json' % i), 'w') as f:
+            json.dump({'curves': sh}, f, separators=(',', ':'))
+
+
 def digest(job):
     keys = ('state', 'reason', 'children', 'parentJob', 'elapsed', 'start', 'end', 'exit', 'node', 'command', 'runFolders', 'lastLine', 'err', 'results')
     return hashlib.md5(json.dumps([job.get(k) for k in keys], sort_keys=True).encode()).hexdigest()
@@ -283,10 +300,11 @@ def main():
         pushed = load(PUSHED, {})
         changed = pushed.get('hash') != whole_digest(known) or pushed.get('curves') != curves_digest({'curves': curves})
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        with open(SNAPSHOT, 'w') as f:
-            json.dump({'checkedAt': now, 'jobs': known}, f)
+        with open(SNAPSHOT, 'w') as f:       # a job that ran several commands is represented by its children only
+            json.dump({'checkedAt': now, 'jobs': {r: j for r, j in known.items() if not j.get('children')}}, f, separators=(',', ':'))
         with open(CURVES, 'w') as f:
             json.dump({'curves': curves}, f)
+        write_curve_shards(curves)
         print('changed since last push' if changed else 'no change since last push')
 
 if __name__ == '__main__':

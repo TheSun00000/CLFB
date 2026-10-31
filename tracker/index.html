@@ -782,9 +782,10 @@ svg.chart .vline { stroke: var(--muted); stroke-width: 1; }
         data.meta = { checkedAt: v.checkedAt };
         loaded.jobs = true; renderAll();
       }, function () { loaded.jobs = true; renderAll(); });
-      db.doc("snapshot/curves").onSnapshot(function (snap) {
-        var v = snap.exists ? (snap.data() || {}) : {};
-        data.curves = v.curves || {};
+      db.collection("snapshot").onSnapshot(function (snap) {      // the learning curves are split over snapshot/curves, curves_1, ... (document size limit)
+        var all = {};
+        snap.docs.forEach(function (d) { if (d.id === "curves" || /^curves_\d+$/.test(d.id)) Object.assign(all, (d.data() || {}).curves || {}); });
+        data.curves = all;
         loaded.curves = true; renderAll();
       }, function () { loaded.curves = true; renderAll(); });
       db.collection("families").onSnapshot(function (snap) {

@@ -31,3 +31,11 @@ ret_mb3_mq001, ret_mb30_mq001, ret_mb300_mq001, ret_mb30_mq1 (tools/queue_retent
 
 ## Log
 (append dated entries: wave submitted, results, decision)
+
+### 2026-11-01 00:50 - measured (final_eval_base, TD3 upper bounds, FT supine)
+Zero-shot return, pretrained -> FB_run (TD3 upper bound): stand 711 -> 965 (971), run 352 -> 441 (461), flip 515 -> 906 (939),
+supine 981 -> 19 (991), jump_any 104 -> 126 (396), kick_l 84 -> 184 (484), split 962 -> 676 (999), flamingo_r 813 -> 395 (990).
+=> FB_run is near the upper bound on stand/run/flip but LOSES a lot on the unaligned tasks the pretrained policy does well: supine -962, flamingo_r -418, split -285.
+FT_supine (best setup on supine): supine 991 (= upper bound) but stand 108, run 26, flip 91: the forgetting is symmetric.
+(Caveat: part of supine/split/flamingo_r at the pretrained model may be default behaviour of the policy, not the latent: only split validated by the random-latent control.)
+Wave 1 submitted at 00:45: jobs 1802637 (mb30), 1802638 (mb3), 1802639 (mb300), 1802640 (mb30 mq1); each ~60-70 min + eval. Entries final_ft_* (kick_l, split, flamingo_r, stand, flip) also running.

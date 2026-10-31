@@ -44,8 +44,8 @@ def main():
         if not m or "'eval_z': 'random'" in info:
             continue
         ev = rd(d + '/eval_log.csv')
-        if not ev or ev[-1].get('stand_fresh_mean') in (None, ''):
-            continue       # an evaluation that does not cover the list
+        if not ev or any(ev[-1].get(t + '_fresh_mean') in (None, '') for t in TASKS):
+            continue       # an evaluation that does not cover the whole list
         n = name_of(m.group(1).replace('models/', ''))
         models[n] = {t: (float(ev[-1][t + '_fresh_mean']), float(ev[-1][t + '_fresh_eps'])) for t in TASKS if ev[-1].get(t + '_fresh_mean') not in (None, '')}
     # training logs of the retention runs

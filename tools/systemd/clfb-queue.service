@@ -1,0 +1,8 @@
+[Unit]
+Description=Submit the queued CLFB experiments to Jean Zay when job slots are free (tools/queue.py submit)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nazim/Script/CLFB
+ExecStart=/home/nazim/Script/CLFB/tools/queue.py submit --notify
+TimeoutStartSec=300

@@ -9,13 +9,13 @@ because the cluster pulls it), written by `add` from a header and a list of shel
 
     tools/queue.py add NAME --time 1:00:00 --cmd "python a ..." [--cmd "python b ..."] [--title "..."] [--slots 1]
     tools/queue.py status            # the list, the jobs on the cluster, the free slots (read-only)
-    tools/queue.py submit [--dry-run]  # submit, in list order, every queued entry that fits in the free slots
+    tools/queue.py submit [--dry-run] [--notify]  # submit, in list order, every queued entry that fits in the free slots (--notify: desktop notification)
     tools/queue.py sync              # update done / failed from Slurm
     tools/queue.py requeue NAME      # put a failed/cancelled entry back in the queue
 
 `submit` refuses to run if the local scripts are not pushed (the cluster would not have them). It pulls the repo on the cluster (fast-forward only).
 """
-import argparse, json, os, re, subprocess, sys
+import argparse, fcntl, json, os, re, subprocess, sys
 from datetime import datetime
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
@@ -45,6 +45,28 @@ CMD="{joined}"
 echo "Running: $CMD"
 mkdir -p models logs
 """
+
+
+def lock():
+    """One queue.py that changes the queue at a time (the systemd timer and an interactive call must not submit twice): the second one just stops."""
+    os.makedirs(os.path.dirname(QFILE), exist_ok=True)
+    f = open(os.path.join(os.path.dirname(QFILE), '.lock'), 'w')
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print('another queue.py is running, skipped')
+        sys.exit(0)
+    return f
+
+
+def notify(body):
+    env = dict(os.environ)
+    env.setdefault('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/%d/bus' % os.getuid())
+    env.setdefault('DISPLAY', ':0')
+    try:
+        subprocess.run(['notify-send', '-a', 'CLFB', 'Jean Zay queue', body], env=env, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def load():
@@ -158,6 +180,7 @@ def submit(a):
     for e in todo:
         script += 'echo "@@%s $(sbatch %s)"\n' % (e['name'], e['script'])
     out = ssh(script)
+    done, bad = [], []
     for line in out.splitlines():
         m = re.match(r'@@(\S+) Submitted batch job (\d+)', line)
         if m:
@@ -165,9 +188,13 @@ def submit(a):
                 if e['name'] == m.group(1):
                     e.update(state='submitted', job_id=m.group(2), submitted=datetime.now().isoformat(timespec='seconds'))
             print('submitted %s -> job %s' % (m.group(1), m.group(2)))
+            done.append('%s (%s)' % (m.group(1), m.group(2)))
         elif line.startswith('@@'):
             print('FAILED', line)
+            bad.append(line)
     save(q)
+    if a.notify and (done or bad):
+        notify('submitted %d: %s%s' % (len(done), ', '.join(done), ('; %d failed' % len(bad)) if bad else ''))
 
 
 def requeue(a):
@@ -185,9 +212,11 @@ def main():
     p.add_argument('--title', default=''); p.add_argument('--slots', type=int, default=1); p.set_defaults(f=add)
     sp.add_parser('status').set_defaults(f=status)
     sp.add_parser('sync').set_defaults(f=sync)
-    p = sp.add_parser('submit'); p.add_argument('--dry-run', action='store_true'); p.set_defaults(f=submit)
+    p = sp.add_parser('submit'); p.add_argument('--dry-run', action='store_true'); p.add_argument('--notify', action='store_true', help='desktop notification when something is submitted'); p.set_defaults(f=submit)
     p = sp.add_parser('requeue'); p.add_argument('name'); p.set_defaults(f=requeue)
     a = ap.parse_args()
+    if a.cmd in ('add', 'submit', 'sync', 'requeue'):
+        _lock = lock()        # kept open until the process ends
     a.f(a)
 
 

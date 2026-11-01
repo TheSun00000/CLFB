@@ -60,3 +60,10 @@ Streams s1 (run > jump_any > flamingo_r > supine) and s2 (flamingo_r > split > j
 - The stored latents carried through the stages (tracked eps at the end) explode with mu_b: s1 run 6690 (mb100), 9327 (mb300), 11.9 (mq0.5 alone) against 0.52 for the control; s2 up to 3e10 (mb100). Suspect an ill-conditioned Sigma_old^-1 at ridge=0 in the stage-end T.
 - Wave e5 (stream s1, one job per setting, 2 seeds): ridge=1e-5 with mb100/mb300 + mq0.5 (tests the blow-up of the stored latents), mb1000 and mb3000 + mq0.5 (stronger span term), alpha=0.9 with mb100 / mb1000 + mq0.5 (more weight on the atoms in nu).
 Third seed of the single-task runs (e4_single_*) still running.
+
+### 2026-11-01 - wave e5 first results and wave e6
+Third seed of the single tasks (e4_single, 3 seeds in total): mu_b 100 + mu_q 0.5 passes on all 8 tasks (others -0.026 to +0.000); mu_q 0.5 alone also; mu_b 300 + mu_q 0.5 fails on stand only (+0.032).
+Streams (e5, stream s1, first runs): alpha 0.9 + mu_b 100: run eps .049 -> .089 -> .110 -> .185 after the four stages (control .042 -> .381 -> .410 -> .355; alpha 0.5 + mu_b 100/300 -> .35), jump_any .072 -> .100 -> .163 (control .465 after stage 3);
+flamingo_r still lost after the last stage (.196 -> .574). mu_b 1000 / 3000 at alpha 0.5: run .23 after stage 3, no better; alpha 0.9 + mu_b 1000: .289 after stage 4; ridge 1e-5 (alpha 0.5): run back to .34-.35, jump_any worse (+0.36 for mb100).
+Stored latents still blow up (alpha 0.9: 150 / 1181; ridge 1e-5: 70-130; mu_b 1000-3000: 6e4-3e5; control 0.5) so ridge 0 is not the whole story.
+Wave e6 (jobs queued): stream s1 alpha 0.99 + mu_b 100, alpha 0.99 + mu_b 300, alpha 0.9 + mu_b 30, alpha 0.9 + mu_b 300; stream s2 alpha 0.9 + mu_b 100, alpha 0.99 + mu_b 100; mu_q 0.5, 2 seeds each.

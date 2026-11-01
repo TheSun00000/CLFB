@@ -72,3 +72,14 @@ Next (wave 3, after af025 finishes): mu_q 0.1 and 0.03 on top of af05 + mb1000, 
 ret_af025_mb300 (R_B 0.056, R_Q 1643): run 394 (just below 397), supine 989, split 681 (71%), flamingo_r 584 (72%), stand 926, flip 744. Fails 'others' (and run by 3).
 Wave 2 = no success (waves without success: 2 of 3). Best so far on the old tasks: af025 for split, mb1000 for flamingo_r. Remaining gap is in the policy/F values (R_Q ~1500) -> wave 3 raises mu_q
 (0.1, 0.03 at af 0.5 + mb1000; 0.1 and 0.01 at af 0.25 + mb1000). If this wave fails, stop the sweep and report (rule: at most 3 waves).
+
+### 2026-11-01 04:15 - wave 3 result: FAILED; sweep stopped (3 waves without success)
+Zero-shot return (pretrained: supine 981, split 962, flamingo_r 813; target >= 85% = 834 / 818 / 691; run >= 397):
+- af05 mb1000 mq0.01 (w2): run 401, split 621, flamingo_r 694. af05 mb1000 mq0.03: run 427, split 590, flamingo_r 329. af05 mb1000 mq0.1: run 415, split 627, flamingo_r 331.
+- af025 mb1000 mq0.01: run 399, split 569, flamingo_r 629. af025 mb1000 mq0.1: run 410, split 609, flamingo_r 439.
+R_Q falls only 1450 -> 1125-1270, R_B ~0, eps of every old task at its pretrained level in all runs (supine 0.36, split 0.46-0.47, flamingo_r 0.76).
+Conclusions: (1) mu_q does not improve split and HURTS flamingo_r (694 -> 330) -> value matching on random latents trades one task for another; keep mu_q = 0.01.
+(2) The actor change fixes supine only (default behaviour). (3) B retention (mu_b 300-1000) keeps eps and gains +200 on flamingo_r but split stays 570-680 (59-70%) whatever the setting:
+the loss is in F / the actor for the split latent, not in B. Best config: af05 mb1000 mq0.01 (run 401, supine 868, split 621, flamingo_r 694) or af025 mb300 (split 681). No run meets the 'others' target.
+Not tried (for the user to decide): the atoms of nu (store z of past tasks: R^B/R^Q on the actual old rewards instead of a uniform sphere), actor loss on stored old latents (replay of z_old in the actor
+at the policy-level), lowering the run focus (z_task_frac). Stopping here as the plan says; no more compute spent.

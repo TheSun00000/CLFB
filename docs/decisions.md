@@ -35,3 +35,7 @@ Newest first. One entry per decision: what, why, what else was considered.
 ### Store only d numbers per task
 - Decision: keep one latent `z_j` per task, updated by `T` at each stage end.
 - Reason: to be filled.
+
+## 2026-11-01 - Retention study (waves 1-3, 12 runs): stop, report
+Decision: stop the mu_b / mu_q / actor-fraction sweep after 3 waves without meeting the 'others' target. Keep mu_q = 0.01 (larger values hurt flamingo_r), mu_b 300-1000 and actor_z_task_frac 0.25-0.5 as the best partial setting.
+Why: B retention restores eps and the actor fix restores supine, but split stays at 59-70% of pretrained and flamingo_r at 61-85%; the loss is in F/actor for those latents. Details and numbers: docs/retention_plan.md (Log).

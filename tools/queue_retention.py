@@ -18,6 +18,14 @@ WAVES = {
         'ret_mb300_mq001': ('mu_b=300 mu_q=0.01', 'strong retention of the span of B'),
         'ret_mb30_mq1':    ('mu_b=30 mu_q=1',     'medium span retention + strong value matching (does the Q term add anything?)'),
     },
+    # w1 result: B is kept (supine eps 0.34 -> 0.37 with mu_b=300, FB_run 0.48) but supine return stays ~13: the ACTOR (trained on z_run only,
+    # actor_z_task_frac=1.0) forgets the other latents. So w2 gives the actor some uniform latents. Flags appended after BASE override it.
+    'w2': {
+        'ret_af05_mb300':  ('actor_z_task_frac=0.5 mu_b=300 mu_q=0.01',  'half of the actor updates on uniform latents + strong span retention'),
+        'ret_af025_mb300': ('actor_z_task_frac=0.25 mu_b=300 mu_q=0.01', 'only a quarter of actor updates on z_run (is run still learned?)'),
+        'ret_af05_mb1000': ('actor_z_task_frac=0.5 mu_b=1000 mu_q=0.01', 'does a stronger R^B add to the actor change? (R_B still 0.1 at 300)'),
+        'ret_af05_nor':    ('actor_z_task_frac=0.5 mu_b=0 mu_q=0',      'control: actor change alone, no retention term'),
+    },
 }
 
 

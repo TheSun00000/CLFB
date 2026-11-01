@@ -46,3 +46,12 @@ Diagnostics (mean of the last chunks): R_B = share of old-family reward energy l
 mu_q=1 destabilises the run (run return 75 at 240k, orth 1.7) -> mq1 is a dead end at this scale; mu_q 0.01 is already worth ~25 in the loss.
 Run return at 240k: mb3 434, mb30 411, mb300 426 (eps 0.03): the retention terms do not hurt the run so far.
 Wait for the final evaluation of the other tasks (expected ~01:40) before wave 2; likely wave 2: mu_b 1000 and 3000 (R_B still >0.1 at 300), mu_q 0.01 and 0.
+
+### 2026-11-01 01:50 - wave 1 result: FAILED (run return fine, others lost)
+Run return 440-450 (FB_run 441) for mb3/mb30/mb300 at mu_q 0.01; mb30_mq1 collapses (run 103, everything lower). Other tasks (mb300 / FB_run / pretrained):
+supine 13 / 19 / 981, split 581 / 676 / 962, flamingo_r 342 / 395 / 813, kick_l 157 / 184 / 84. No run meets the 'others' target (supine alone fails it).
+Diagnostics: R_B 0.27 (mb3), 0.26 (mb30), 0.11 (mb300); R_Q 1850-2270, 5660 with mu_q 1.
+Key observation: with mu_b=300 the eps of supine is 0.37 (pretrained 0.34, FB_run 0.48), split 0.51 (0.48, 0.60), flamingo_r 0.75 (0.79, 0.83), jump_any 0.52 (0.42, 0.63):
+B keeps (part of) the span, yet the returns do not come back. => the policy is what forgets: the actor is trained on z_run only (actor_z_task_frac=1.0).
+Decision rule 'eps preserved, returns drop' applies: wave 2 = actor_z_task_frac 0.5/0.25 with mu_b 300 (+ mb1000, + a control without retention terms to separate the actor effect from R^B).
+Risk: the earlier return study found actor focus 1.0 best for run return; the run target is >= 397.

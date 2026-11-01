@@ -51,15 +51,17 @@ def main():
         task = re.search(r"'tasks': '?([a-z_]+)", info).group(1)
         b, e = base[0], end[-1]
         steps = {int(float(r['step'])): r for r in ev if r['tag'] in ('mid', 'end')}
+        mu = (float(re.search(r'mu_b=(\S+)', info).group(1)) if 'mu_b=' in info else 0.0, float(re.search(r'mu_q=(\S+)', info).group(1)) if 'mu_q=' in info else 0.0)
         runs.setdefault(cfg, []).append({
-            'task': task, 'base': {t: fl(b, t + '_fresh_eps') for t in TASKS}, 'end': {t: fl(e, t + '_fresh_eps') for t in TASKS},
+            'task': task, 'mu': mu, 'base': {t: fl(b, t + '_fresh_eps') for t in TASKS}, 'end': {t: fl(e, t + '_fresh_eps') for t in TASKS},
             'trained_steps': {s: fl(r, task + '_fresh_eps') for s, r in sorted(steps.items())}})
     if not runs:
         sys.exit('no finished run with model_dir=models/eps/ in hpc/logs')
-    refs = {}       # trained task -> mean trained eps of its control ('ctrl' in the configuration name)
+    refs = {}       # trained task -> mean trained eps of its control (no retention terms)
     for c, rs in runs.items():
-        if 'ctrl' in c:
-            refs[rs[0]['task']] = st.mean(r['end'][r['task']] for r in rs)
+        if ('ctrl' in c) or all(r['mu'] == (0.0, 0.0) for r in rs):
+            refs.setdefault(rs[0]['task'], []).extend(r['end'][r['task']] for r in rs)
+    refs = {t: st.mean(v) for t, v in refs.items()}
     any_run = next(iter(runs.values()))[0]
     ALIGNED_NOTE = 'aligned = stand, run, flip only when the trained task is one of them'
     print('pretrained eps:   ' + ' '.join('%s %.3f' % (t[:6], any_run['base'][t]) for t in TASKS))
@@ -80,6 +82,29 @@ def main():
         print('%-26s %2d %-9s %s | %s | %+.3f %s' % (cfg, len(rs), t, ('%s (end %.3f+-%.3f)' % (mids, tr, sd)).ljust(40),
               ' '.join('%+.2f' % dl[x] for x in TASKS), mx, 'OK' if ok else ''))
     print('columns of the changes: ' + ' '.join(TASKS))
+    # matrix by (mu_b, mu_q) and trained task: 'trained eps / largest rise of the others', OK = success
+    by = {}
+    for cfg, rs in runs.items():
+        t = rs[0]['task']
+        al = ALIGNED if t in ALIGNED else set()
+        for r in rs:
+            by.setdefault((r['mu'], t), []).append(r)
+    tasks = [t for t in TASKS if any(k[1] == t for k in by)]
+    print()
+    print('by setting (mu_b, mu_q) x task fine-tuned on: trained eps / largest rise of the others (repeats pooled), * = success; control trained eps in the first row')
+    print('%-14s ' % 'mu_b, mu_q' + ' '.join('%-17s' % t for t in tasks))
+    for mu in sorted({k[0] for k in by}):
+        cells = []
+        for t in tasks:
+            rs = by.get((mu, t))
+            if not rs:
+                cells.append('%-17s' % '.'); continue
+            al = ALIGNED if t in ALIGNED else set()
+            tr = st.mean(r['end'][t] for r in rs)
+            mx = max(max(r['end'][x] - r['base'][x] for x in TASKS if x not in al and x != t) for r in rs)
+            ok = t in refs and tr <= refs[t] + 0.03 and mx <= 0.03
+            cells.append('%-17s' % ('%.3f / %+.3f%s (%d)' % (tr, mx, '*' if ok else ' ', len(rs))))
+        print('%-14s ' % ('%g, %g' % mu) + ' '.join(cells))
 
 
 if __name__ == '__main__':

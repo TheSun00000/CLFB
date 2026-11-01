@@ -32,3 +32,13 @@ Family 'eps-study' (first in the Results tab): rows of 3 charts side by side = e
 (mu_q small, mu_q large, mu_b, both; then one row per other fine-tuned task). Curves: `epsg` {A,B,C} in snapshot/curves (tools/job_results.py: eps_groups). Page changes (tracker/index.html, also brought back in line with the live version): plots epsA/epsB/epsC,
 `cols: 3` layout, compact charts, and the jobs are merged from snapshot/jobs, jobs_1, ... (the single jobs document passed the 262144 byte limit; tools/hpc_status.py writes hpc/status/jobs_<n>.json).
 61 tracking docs (children of 1810531-33 and 1812205-07), updates entry 2026-11-01-eps. Wave e2 charts fill in as the jobs finish; the family summary is to be updated with the e2 results.
+
+### 2026-11-01 - wave e2 result (jobs 1812205-07; 34 runs, 2 seeds each) and wave e3
+`python tools/eps_report.py` now ends with a matrix by (mu_b, mu_q) x task fine-tuned on ('trained eps / largest rise of the others', * = success: trained eps <= control + 0.03 and no other task rises by more than 0.03).
+- run: mu_q 0.3 .060 (+0.022), 0.5 .055 (-0.034), 1 .062 (-0.060), 2 .104, 3 .141, 10 .199 (fit blocked above 1); mu_b 100 + mu_q 1 .056 (-0.022). Control .036 (+0.135).
+- other fine-tuned tasks, control / mu_q 1 / mu_b 100 + mu_q 1 (trained eps; largest rise of the others): supine .033 (+.013) / .049 (-.047) / .044 (-.039); split .057 (+.016) / .095 (-.036) / .095 (-.014);
+  jump_any .030 (+.082) / .058 (-.070) / .047 (-.027); flamingo_r .043 (+.084) / .082 (-.030) / .065 (-.034). Forgetting without retention terms exists for run, jump_any, flamingo_r (+0.08 to +0.135), not for supine and split.
+- mu_q 1 and mu_b 100 + mu_q 1 remove it on the tasks that forget, and lower the eps of the others below the pretrained level; the price is trained eps +0.02 to +0.04 (split +0.038 is the only one over the 0.03 tolerance).
+Wave e3 (jobs 1813548-50, 42 runs): mu_q 0.5 on 7 tasks, mu_b 100 + mu_q 0.5 on 8 tasks, mu_b 100 + mu_q 1 and the controls on stand, flip, kick_l. Goal: one setting that passes on all 8 tasks.
+Stop rule: a (mu_b, mu_q) with * on all 8 tasks (2 seeds) -> stop and report; else look at the failing tasks before another wave (max 2 more waves).
+Tracker pushed with e1 + e2 (family 'eps-study'); e3 children are added when the jobs start.

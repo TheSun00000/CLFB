@@ -353,7 +353,7 @@ def ep_class(cmd):
         panels = [EP_MQ_SMALL if q <= 0.5 else EP_MQ_LARGE]
     elif q == 0:
         panels = [EP_MB]
-    elif not (b == 1000 and q == 0.01):         # a panel holds at most 5 lines; the (1000, 0.01) run stays in the table
+    elif not (b == 1000 and q in (0.01, 0.1)):         # a panel holds at most 5 lines; the (1000, 0.01) and (1000, 0.1) runs stay in the table
         panels = [EP_BOTH]
     return 'eps-study', 'run: %s' % lab, order, '|'.join(panels), '|'.join([lab] * len(panels)), False
 
@@ -552,7 +552,7 @@ SETUP = {
 
 def ep_figures():
     rows = [(EP_MQ_SMALL, 'run, mu_q alone (0.01 to 0.5)', 'run'), (EP_MQ_LARGE, 'run, mu_q alone (1 to 10)', 'run'), (EP_MB, 'run, mu_b alone', 'run'), (EP_BOTH, 'run, mu_b and mu_q together', 'run')]
-    rows += [('fine-tuning on %s' % t, 'fine-tuning on %s' % t, t) for t in ('supine', 'split', 'jump_any', 'flamingo_r')]
+    rows += [('fine-tuning on %s' % t, 'fine-tuning on %s' % t, t) for t in ('supine', 'split', 'jump_any', 'flamingo_r', 'stand', 'flip', 'kick_l')]
     figs = []
     for panel, name, task in rows:
         if task == 'run':
@@ -561,8 +561,10 @@ def ep_figures():
             c = ('%s: the 5 other tasks (mean)' % name, 'supine, jump_any, kick_l, split, flamingo_r: the tasks that should stay at the pretrained level (0.54 averaged), flat or lower is good.')
         else:
             a = ('%s: %s (trained)' % (name, task), 'Does the trained task still get encoded? Lower is better.')
-            b = ('%s: run, stand and flip (mean)' % name, 'Three tasks that share a span; they must not rise.')
-            c = ('%s: the 4 other tasks (mean)' % name, 'The tasks that should stay at the pretrained level, flat or lower is good.')
+            al = [x for x in ('run', 'stand', 'flip') if x != task]
+            b = ('%s: %s (mean)' % (name, ' and '.join(al) if len(al) == 2 else 'run, stand and flip'),
+                 'The tasks that share a span with it; they must not rise.')
+            c = ('%s: the %d other tasks (mean)' % (name, 5 if task in ('stand', 'flip') else 4), 'The tasks that should stay at the pretrained level, flat or lower is good.')
         for plot, (t, w) in zip(('epsA', 'epsB', 'epsC'), (a, b, c)):
             figs.append({'plot': plot, 'panel': panel, 'title': t, 'why': w})
     return figs
@@ -571,7 +573,7 @@ def ep_figures():
 EXTRA = {
     'eps-study': {
         'cols': 3, 'table': 'eps',
-        'summary': 'Fine-tuning on run: eps of run falls from 0.351 to 0.036 within 10k updates, so 30k updates are more than enough. Without retention terms the eps of the other tasks rises, mostly jump_any (+0.12), supine and kick_l (+0.03). mu_b alone does not stop it until it blocks the fit (mu_b 10000: eps of run stays at 0.19). mu_q alone at 1 gives eps 0.062 on run and lowers the eps of every other task by 0.06 to 0.14 (both seeds); mu_q 10 blocks the fit (0.199). Per-run numbers: python tools/eps_report.py; plan and log in docs/eps_plan.md. Wave e2 (mu_q 0.3 to 3, and the key settings when fine-tuning on supine, split, jump_any, flamingo_r) was still running when this was written.',
+        'summary': 'Fine-tuning on run: eps of run falls from 0.35 to 0.04 within 10k updates, so 30k updates are more than enough. Without retention terms the eps of the other tasks rises, mostly jump_any (+0.12), supine and kick_l (+0.03). mu_b alone does not stop it until it blocks the fit (mu_b 10000: eps of run stays at 0.19). mu_q is the term that holds the others: at 0.5 to 1 every other task stays flat or goes DOWN (by 0.03 to 0.14) while eps of run ends at 0.055 to 0.062 (0.036 without); at 2 or more the fit is blocked (0.10 to 0.20). mu_b 100 together with mu_q 1 is about the same as mu_q 1 alone. Other fine-tuned tasks (2 seeds): supine and split forget little without retention terms (rise <= +0.016); jump_any and flamingo_r do (+0.08 to +0.084) and mu_b 100 + mu_q 1 removes it (every other task flat or lower) at eps 0.047 / 0.065 on the trained task (0.030 / 0.043 without); split ends at 0.095 (0.057 without), slightly more than the 0.03 tolerance. Wave e3 (mu_q 0.5, mu_b 100 + mu_q 0.5, mu_b 100 + mu_q 1 on all 8 tasks) is running. Per-run numbers: python tools/eps_report.py; plan and log in docs/eps_plan.md.',
         'figures': ep_figures()},
     'retention': {
         'standalone': True,

@@ -2,6 +2,9 @@
 
 Newest first. One entry per work session: what was done, what was learned, what comes next.
 
+## 2026-11-01 (day, autonomous) - sanity study of mu_b / mu_q, waves s1-s3
+26 runs (jobs 1807646-55, 1807807-08, 1807955-62, 1808303-08; `tools/queue_sanity.py`, plan and results in `docs/sanity_plan.md`). Findings: (1) with lam=0 and theta=theta_old, R^B and R^Q alone keep B at the pretrained values (eps +-0.03); (2) the estimator had a noise floor (Sigma_old on other states): new flag `est_same=1` removes it (R^Q 2000 -> 160-1050) and the harm of mu_q alone; (3) returns are noisy (control and actor-only repeats differ by 50-200 per task) and B drifts with the pretraining loss alone (eps .3 -> .45 in 200k updates, grows with steps x lr), the actor drifts alone: the single-run retention waves cannot be read at the +-200 level. Tracker: not updated (sanity runs not added; family and describe_jobs branch to write).
+
 ## 2026-11-01 (afternoon) - sanity check of mu_b / mu_q
 - Wave 4 (ridge=0, lam 0.5 / 0.25, jobs 1807366-67) was a mistake of the user's: cancelled, removed from the queue and from git.
 - Check with the real pretrained walker FB nets on real states (float64, local GPU, user-authorized): with ridge=0 and theta_new=theta_old, R^B = 5e-16 and R^Q = 4e-26 if Sigma_old and A use the same states, but R^B = -0.10 and R^Q = 2446 with the training estimator (Sigma_old on n_big=50000 states, A on another n_est=4096 batch). The noise floor falls with n_est (R^Q: 7900 / 2100 / 1100 / 53 for 1k / 4k / 16k / 50k). The R_Q ~1100-1700 logged in the retention waves is of that size: probably mostly estimator noise. Estimator not changed yet.

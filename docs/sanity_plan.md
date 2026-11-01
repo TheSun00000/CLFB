@@ -47,3 +47,14 @@ Wave s2 (8 runs, jobs 1807955-62): A0 repeat (noise), est_same=1 on A1, A2, A3, 
 Conclusion s2: the estimator fix removes the noise floor and the spurious harm of mu_q; what remains (split, flamingo returns, B drift with L_FB) does not depend on mu_b / mu_q.
 Wave s3 (last allowed by the plan, 6 runs): `freeze_fb=1` (only the actor trained) 200k x2 and 50k; control A0 at 20k and 50k updates; A0 with lr/3.
 Question answered by s3: is the split loss the actor's own drift (freeze_fb), does it grow with steps, and is the B drift an immediate effect of restarting (Adam / target reset) or accumulates.
+
+### 2026-11-01 ~10:30 - wave s3 result (6 runs) and end of the sanity study
+- Actor only (freeze_fb=1, F and B exactly pretrained, eps = pretrained +-0.01): returns still move: split -188 (50k), -160 and -48 (200k, two seeds), flip +42 / -159 / +43, stand +61 / +20 / +107, flamingo_r +25 / -54 / +22.
+  => the actor's own update, with nothing else changing, moves the returns by up to ~190 per task and by a different amount in each repeat. Single-run differences below ~200 on split are within this actor noise.
+- B drift grows with the number of updates (control A0, eps of stand/run/flip): 20k .27 .33 .30 (not worse than pretrained .30 .33 .34), 50k .33 .39 .39, 200k .43-.48 .46-.49 .44-.50; with lr/3 at 200k .34 .38 .41. So it accumulates (scales with lr x steps), it is not a jump at the restart.
+- Conclusions of the sanity study (waves s1-s3, 26 runs):
+  1. R^B and R^Q alone (group C) keep the model at its pretrained values (eps +-0.03, orth 0.43-0.47) - they pass the check. mu_b=100-1000 also keeps B from collapsing when L_FB is off (B1, B3: eps pretrained vs 0.91 without).
+  2. With Sigma_old on other states than A, the terms have a noise floor (R^B ~0.07, R^Q ~2000 at n_est=4096) and mu_q alone then harms the model (A2). `est_same=1` removes the floor (R^Q 160-1050, R^B ~0) and the harm.
+  3. Returns are noisy: control repeats and actor-only repeats differ by 50-200 per task. The earlier retention waves (single runs) cannot resolve differences of that size: the split gap (-285 for FB_run, 570-680 in the waves) is larger than this noise, but the differences between waves are not.
+  4. Drift not related to mu_b / mu_q: B drifts with the pretraining loss alone (continuing at lr 1e-4 for 200k updates raises eps from .3 to .45), the actor drifts alone.
+Next, if continued: re-run the best retention configuration with est_same=1 and 3 seeds (no repeat exists), and cap the drift of B and the actor (fewer steps, lower lr). Nothing else queued.

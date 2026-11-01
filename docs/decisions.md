@@ -2,6 +2,11 @@
 
 Newest first. One entry per decision: what, why, what else was considered.
 
+## 2026-11-01: `est_same` flag (Sigma_old on the step's own n_est states), default off
+- Decision: add `est_same` to `fb_continual_temp.py` (default 0, so earlier runs are unchanged). With 1, Sigma_old^-1 used in T, M and the R^B denominator is re-estimated at every step on the same n_est states as Sigma_theta and A, so that R^B = R^Q = 0 exactly at theta = theta_old.
+- Why: with Sigma_old on n_big other states, R^B/R^Q have a noise floor (R^B ~0.07, R^Q ~2000 at n_est=4096) and mu_q alone pushes F off its pretrained values (sanity A2 vs A2f). Not made the default: the retention waves and docs/experiments.md were run without it; the stage-end T (n_big fresh states, Sigma_old on others) still has a ~3% mismatch.
+- Evidence: waves s1/s2 in docs/sanity_plan.md. Also new flag `q_loss` (default 1) to allow runs where only mu_b R^B and mu_q R^Q train F and B.
+
 ## 2026-11-01: sanity runs with lam=0 before more retention sweeps
 - Decision: 12 runs with lam=0, ridge=0, uniform latents (z_task_frac=actor_z_task_frac=0), to see what mu_b and mu_q do alone when theta_new = theta_old (no returns should drop). Also fb_objective=0, and a mode where mu_b R^B + mu_q R^Q is the only loss on F and B (new flag `q_loss=0`, default unchanged).
 - Why: R^B / R^Q are not 0 at theta = theta_old with the current estimator (Sigma_old and A on different state batches: R^B -0.10, R^Q ~2400 at n_est=4096), so the earlier waves cannot separate real drift from noise. The ridge=0 decision below was used for wave 4 only, which the user cancelled; the sanity runs use ridge=0 too.

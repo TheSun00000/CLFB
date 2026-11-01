@@ -194,6 +194,26 @@ def write_curve_shards(curves):
             json.dump({'curves': sh}, f, separators=(',', ':'))
 
 
+PUSH_SNAPSHOT = os.path.join(OUT, 'snapshot_push.json')
+PAGE_RESULT_KEYS = ('text', 'extra', 'best', 'final', 'start', 'std')      # the keys of job['results'] that the tracker page reads
+
+
+def write_push_snapshot(now, jobs):
+    """hpc/status/snapshot_push.json = snapshot.json without the fields the tracker page never reads (exit, partition, node, an empty err, lastLine of
+    jobs that are not running, the other keys of results): a database document is limited to 262144 bytes and the full snapshot passed it (302 kB, 325 jobs)."""
+    out = {}
+    for r, j in jobs.items():
+        k = {a: b for a, b in j.items() if a not in ('exit', 'partition', 'node')}
+        if not k.get('err'): k.pop('err', None)
+        if k.get('status') != 'running': k.pop('lastLine', None)
+        if k.get('results'): k['results'] = {a: b for a, b in k['results'].items() if a in PAGE_RESULT_KEYS}
+        out[r] = k
+    with open(PUSH_SNAPSHOT, 'w') as f:
+        json.dump({'checkedAt': now, 'jobs': out}, f, separators=(',', ':'))
+    if os.path.getsize(PUSH_SNAPSHOT) > 255_000:
+        print('WARNING: %s is %d bytes: close to the 262144 byte limit of a tracker document, shard the jobs' % (PUSH_SNAPSHOT, os.path.getsize(PUSH_SNAPSHOT)))
+
+
 def digest(job):
     keys = ('state', 'reason', 'children', 'parentJob', 'elapsed', 'start', 'end', 'exit', 'node', 'command', 'runFolders', 'lastLine', 'err', 'results')
     return hashlib.md5(json.dumps([job.get(k) for k in keys], sort_keys=True).encode()).hexdigest()
@@ -302,6 +322,7 @@ def main():
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         with open(SNAPSHOT, 'w') as f:       # a job that ran several commands is represented by its children only
             json.dump({'checkedAt': now, 'jobs': {r: j for r, j in known.items() if not j.get('children')}}, f, separators=(',', ':'))
+        write_push_snapshot(now, {r: j for r, j in known.items() if not j.get('children')})
         with open(CURVES, 'w') as f:
             json.dump({'curves': curves}, f)
         write_curve_shards(curves)

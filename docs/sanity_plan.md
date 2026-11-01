@@ -58,3 +58,7 @@ Question answered by s3: is the split loss the actor's own drift (freeze_fb), do
   3. Returns are noisy: control repeats and actor-only repeats differ by 50-200 per task. The earlier retention waves (single runs) cannot resolve differences of that size: the split gap (-285 for FB_run, 570-680 in the waves) is larger than this noise, but the differences between waves are not.
   4. Drift not related to mu_b / mu_q: B drifts with the pretraining loss alone (continuing at lr 1e-4 for 200k updates raises eps from .3 to .45), the actor drifts alone.
 Next, if continued: re-run the best retention configuration with est_same=1 and 3 seeds (no repeat exists), and cap the drift of B and the actor (fewer steps, lower lr). Nothing else queued.
+
+### 2026-11-01 - tracker
+Family 'sanity' (tools/describe_jobs.py: sn_* helpers), 52 tracking docs (26 training jobs + their evaluations), Updates entry 2026-11-01-sanity pushed. snapshot/jobs had passed the 262144 byte limit of a document (302 kB, 325 jobs):
+`tools/hpc_status.py --diff` now also writes `hpc/status/snapshot_push.json` (250 kB, fields the page never reads removed) and warns above 255 kB; the next growth needs the jobs sharded like the curves (and a page change).

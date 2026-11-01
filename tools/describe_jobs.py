@@ -315,11 +315,75 @@ def rw_class(cmd):
     return 'retention', v, order, '', v, False
 
 
+def sn_is(cmd):
+    """Sanity runs of mu_b / mu_q (tools/queue_sanity.py): models/ret/san*, lam=0, uniform latents."""
+    return 'fb_continual_temp.py' in cmd and 'models/ret/san' in cmd
+
+
+def sn_name(cmd):
+    m = re.search(r'models/ret/(san[^/\s]+)', cmd)
+    return m.group(1) if m else ''
+
+
+def sn_parts(cmd):
+    """(group, loss, mu_b, mu_q, same, steps, lr_note)"""
+    fbo, ql = flag(cmd, 'fb_objective', '1'), flag(cmd, 'q_loss', '1')
+    grp = 'act' if flag(cmd, 'freeze_fb') == '1' else ('C' if ql == '0' else ('B' if fbo == '0' else 'A'))
+    loss = {'act': 'actor only (F and B frozen)', 'C': 'only mu_b R^B and mu_q R^Q train F and B',
+            'B': 'Q loss + ortho (L_FB off)', 'A': 'pretraining loss (L_FB + Q loss + ortho)'}[grp]
+    steps = int(flag(cmd, 'steps_per_stage', '200000'))
+    lr = 'lr/3' if flag(cmd, 'lr') == '0.00003' else ''
+    return grp, loss, flag(cmd, 'mu_b', '0'), flag(cmd, 'mu_q', '0'), flag(cmd, 'est_same') == '1', steps, lr
+
+
+def sn_var(cmd):
+    grp, loss, mb, mq, same, steps, lr = sn_parts(cmd)
+    return '%s, mu_b %s, mu_q %s%s%s%s' % (loss, mb, mq, ', Sigma_old on the same states' if same else '',
+                                           ', %dk updates' % (steps // 1000) if steps != 200000 else '', ', ' + lr if lr else '')
+
+
+def sn_text(cmd):
+    if flag(cmd, 'eval_ckpt'):
+        return ('Sanity: evaluation of %s on the 8 tasks' % sn_name(cmd), 'No training. Zero-shot return and reward error of the model %s on each of the 8 tasks.' % sn_name(cmd))
+    return ('Sanity (lam 0): %s' % sn_var(cmd),
+            'Sanity check of the retention terms: the pretrained walker FB model is trained on run with lam=0 (no reward term), ridge=0 and uniform latents everywhere (z_task_frac=0, actor_z_task_frac=0), so the model starts at theta_old and nothing asks it to learn run. '
+            'Loss on F and B: %s; mu_b=%s, mu_q=%s%s; %d updates%s. The model should stay where it is; compare with the pretrained model on the 8 tasks (an evaluation follows in the same job).'
+            % (sn_parts(cmd)[1], sn_parts(cmd)[2], sn_parts(cmd)[3],
+               '; Sigma_old re-estimated on the states of the step (est_same=1)' if sn_parts(cmd)[4] else '', sn_parts(cmd)[5], ', lr/3' if sn_parts(cmd)[6] else ''))
+
+
+def sn_class(cmd):
+    """(family, variant, order, panels, series, ref). A panel holds at most 5 lines."""
+    if flag(cmd, 'eval_ckpt'):
+        n = sn_name(cmd) if sn_name(cmd) else re.search(r'models/ret/([^/\s]+)', cmd).group(1)
+        return 'sanity', 'Evaluation, ' + n, 100000, '', 'Evaluation, ' + n, False
+    grp, loss, mb, mq, same, steps, lr = sn_parts(cmd)
+    mu = 'mu_b %s, mu_q %s' % (mb, mq)
+    ctl = grp == 'A' and mb == '0' and mq == '0' and steps == 200000 and not lr
+    panels, series = [], []
+    if grp == 'A' and steps == 200000 and not lr and not same:
+        panels.append('pretraining loss on'); series.append(mu)
+    if grp == 'A' and steps == 200000 and not lr and (same or ctl):
+        panels.append('pretraining loss on, Sigma_old on the same states'); series.append(mu + ('' if ctl or not same else ' (same states)'))
+    if grp == 'B':
+        panels.append('L_FB off (Q loss + ortho)'); series.append(mu + (' (same states)' if same else ''))
+    if grp == 'C':
+        panels.append('only mu_b and mu_q train F and B'); series.append(mu + (' (same states)' if same else ''))
+    if grp == 'A' and mb == '0' and mq == '0':
+        panels.append('drift without retention terms'); series.append('pretraining loss, %dk updates%s' % (steps // 1000, ', ' + lr if lr else ''))
+    if grp == 'act' or ctl:
+        panels.append('actor only (F and B frozen)'); series.append('actor only, %dk updates' % (steps // 1000) if grp == 'act' else 'pretraining loss (F and B trained)')
+    order = {'A': 0, 'B': 100, 'C': 200, 'act': 300}[grp] + float(mb) / 1000 + float(mq) + (0.5 if same else 0) + steps / 1e7
+    return 'sanity', sn_var(cmd), order, '|'.join(panels), '|'.join(series), False
+
+
 def describe(j):
     cmd, st = j['command'] or '', j['status']
     arr = j['arrayJob'] or j['jobId']
     tail = ''
-    if rw_is(cmd):
+    if sn_is(cmd):
+        title, desc = sn_text(cmd)
+    elif rw_is(cmd):
         title, desc = rw_text(cmd)
     elif is_final(cmd):
         title, desc = final_text(cmd)
@@ -412,6 +476,8 @@ FAMILIES = {
                      "Can the return reach the E3 level (419-438 after 1M updates; TD3 on the same reward 475-485) when F and the actor train partly on the task latent, with L_rec, L_FB and the orthonormality term all active? Walker run, 100k labels, 500k updates."),
     'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 0.5,
                     "Can L_rec, the reward term of the continual method, fit the reward in B as well as the E3 reference (fit_backward_to_reward) while L_FB and the orthonormality term stay active? Walker run, one stage."),
+    'sanity': ('Sanity check of mu_b and mu_q', 0.06,
+                'Do the retention terms leave a model alone when theta_new = theta_old? lam=0, uniform latents, nothing asks the model to learn run. Walker, 200k updates, 26 runs in 3 waves.'),
     'task-design': ('Reward design: tasks that are not aligned with the built-in ones', -1,
                     'Which new walker rewards are uncorrelated with stand, walk, vel8, run and flip, and with each other? 54 rewards (48 new, 6 from the first study) defined on the observation, evaluated on 100k dataset states, no training of anything.'),
     'retention': ('Retention: fine-tune on run without forgetting the other tasks', 0.05,
@@ -424,6 +490,7 @@ FAMILIES = {
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 SETUP = {
+    'sanity': 'Start: the pretrained walker FB model. Every run trains it on the task run for 200k updates (100k labelled states of run, 10k per evaluation) with lam=0 (no reward term), ridge=0, and uniform latents for F and the actor (z_task_frac=0, actor_z_task_frac=0), so the model begins at theta_old and nothing asks it to learn run. Groups: A = the pretraining loss (L_FB + Q loss + ortho) with mu_b and mu_q varied; B = fb_objective=0 (Q loss + ortho, L_FB off); C = fb_objective=0 q_loss=0 ortho_coef=0 (only mu_b R^B + mu_q R^Q trains F and B); actor only = freeze_fb=1; est_same=1 = Sigma_old re-estimated on the states of the step instead of on 50000 others; the rest are controls with fewer updates or a lower learning rate. Charts: the reward error of B on run along the training (lower is better; the pretrained model is at 0.33) and the orthonormality error. After training every model is evaluated zero-shot on the 8 tasks (latent from 10k labelled states, 20 episodes): tools/retention_report.py, docs/sanity_plan.md.',
     'retention': 'Start: the pretrained walker FB model. Every run fine-tunes it on the task run for 500k updates with the best setup of the return study (reward term L_rec lam 100 on 100k labelled states, focus 0.5, noise 0.2, actor focus 1.0 unless the variant says otherwise: "actor x" = share of actor updates on the run latent, the rest on uniform latents; L_FB and orthonormality on) plus the retention terms: mu_b = the loss of the span of B (the share of reward energy of the old family of rewards that B can no longer represent), mu_q = the change of the values (F^T z) of that family. With one task and no stored latents the old family is every reward in the span of the pretrained B (latents drawn uniformly on the sphere). Then each model is evaluated zero-shot on the 8 tasks of the list (latent inferred from 10k labelled states, 20 episodes) and compared with the pretrained model and with FB_run (no retention). Target: run return >= 0.9 x FB_run, the tasks the pretrained model does well (>= 300) keep >= 85% of their return, reward error of the unaligned tasks within +0.03.',
     'final-tasks': 'B-only learnability: B alone is fitted from the pretrained B on each task (fixed readout, 30k steps) and the held-out reward error is measured. TD3 upper bound: offline TD3 from scratch on the true reward of each task, 1M updates, one run. Fine-tuning: the best setup of the return study (lam 100, focus 0.5, noise 0.2, actor focus 1.0; 500k updates, 100k labelled states, no retention terms) trained on one task at a time, the return on that task evaluated during training, then every model evaluated zero-shot on all 8 tasks (latent inferred from 10k labelled states, 20 episodes). Experiments are submitted automatically from a local queue (tools/queue.py).',
     'return-focus': 'All fine-tuned models start from the same pretrained FB model (the "pretrained model" row of the tables). Each is trained for 500k updates on one task, run, with 100k labelled states of run: B, F and the actor are all updated (the FB objective, the orthonormality term, and the reward term L_rec that regresses the reward of run on B). In addition the latent of run is mixed into the latents used to train F and the actor (focus). The retention terms are off: there is only one task. Evaluation: zero-shot return, the latent being inferred from 10k labelled states of the task, 20 episodes of 1000 steps.',
@@ -440,6 +507,23 @@ EXTRA = {
         'standalone': True,
         'summary': 'Not solved. Fine-tuning on run (FB_run) loses supine (981 -> 19), flamingo_r (813 -> 395) and split (962 -> 676). Training the actor on uniform latents half of the time (actor 0.5) restores supine (~980, also with no retention term: supine is mostly default behaviour of the policy). mu_b 300-1000 brings the reward error of all old tasks back to the pretrained level and lifts flamingo_r to ~690, but split stays at 570-680 (59-70% of 962) in every setting, and mu_q above 0.01 does not help and drops flamingo_r to ~330. The run itself is kept (394-450, FB_run 441). 12 runs, 3 waves (jobs 1802637-40, 1803564-67, 1804737-40). The mu_b and mu_q terms need to be revised: with one task and no stored latents they act on a uniform sphere of latents, which does not protect the latent of split. Per-task numbers: docs/retention_plan.md (Log), evaluations in the Experiments tab.',
     },
+    'sanity': {
+        'summary': 'With only mu_b R^B and mu_q R^Q as the loss on F and B (runs C), the model stays at the pretrained one: reward error within 0.03 of it on all 8 tasks, orthonormality 0.43-0.47. mu_b of 100 or more also keeps B from collapsing when L_FB is switched off (error 0.29-0.34 against 0.91 without). The first version of the estimator had a noise floor at theta_old (R^B ~0.07, R^Q ~2000 instead of 0, because Sigma_old came from other states than A), and mu_q alone then pushed the model away (flip 340 against 602 for the control); with Sigma_old on the states of the step (est_same=1) the floor falls to R^Q 160-1050 and the harm goes. What does not depend on mu_b and mu_q: B drifts with the pretraining loss alone (reward error of stand 0.30 -> 0.43-0.48 after 200k updates, growing with updates x lr), and the actor drifts alone (split -48 to -188 with F and B frozen); returns differ by 50-200 per task between repeats of the same run, so single-run differences of that size in the retention study are noise. Jobs 1807646-55, 1807807-08, 1807955-62, 1808303-08; run folders logs/2026-11-01_07-04-03_FBcontinual-walker-run ... 2026-11-01_08-09-59_FBcontinual-walker-run_3 and models/ret/san*; per-run numbers in docs/sanity_plan.md.',
+        'figures': [
+            {'plot': 'eps', 'panel': 'only mu_b and mu_q train F and B', 'title': 'Does the model stay put when only mu_b and mu_q act?',
+             'why': 'Reward error of B on run, held-out, along training (the pretrained model is at 0.33): with only the retention terms it stays there for all five runs, with Sigma_old on other states or on the same states.'},
+            {'plot': 'orth', 'panel': 'only mu_b and mu_q train F and B', 'title': 'Is B still orthonormal?',
+             'why': 'Orthonormality error of B (the pretrained model is at 0.43): unchanged when only the retention terms act.'},
+            {'plot': 'eps', 'panel': 'L_FB off (Q loss + ortho)', 'title': 'What mu_b does when L_FB is off',
+             'why': 'Without L_FB (and without mu_b) B collapses, reward error 0.9; mu_b of 100 keeps it at the pretrained level (0.33), mu_q alone does not.'},
+            {'plot': 'eps', 'panel': 'pretraining loss on', 'title': 'Pretraining loss on, Sigma_old on other states (first estimator)',
+             'why': 'The control (mu 0, 0) drifts from 0.33 upwards while mu_b of 1000 keeps it; this is the version with the noise floor.'},
+            {'plot': 'eps', 'panel': 'pretraining loss on, Sigma_old on the same states', 'title': 'Same, Sigma_old on the states of the step (est_same)',
+             'why': 'Same runs with the estimator fix; the control (mu 0, 0) is repeated here as the reference line.'},
+            {'plot': 'eps', 'panel': 'drift without retention terms', 'title': 'The drift of B without any retention term',
+             'why': 'The pretraining loss alone, continued from the pretrained model: the error grows with the number of updates (20k, 50k, 200k) and is smaller at a third of the learning rate.'},
+            {'plot': 'eps', 'panel': 'actor only (F and B frozen)', 'title': 'With F and B frozen',
+             'why': 'Reference line: F and B do not move at all (error equal to the pretrained one); the returns of the 8 tasks still move by up to 190 because the actor is trained (see the summary).'}]},
     'final-tasks': {
         'standalone': True,
         'summary': 'B alone can encode every task of the list: after a fit of B from the pretrained B, the held-out reward error is at most 0.013 for all 8 tasks with 100k labelled states, and at most 0.04 with 10k, except flamingo_r (0.11), the rarest task (satisfied in 9% of the states). The pretrained B encodes none of them well (0.29-0.78): the three built-in tasks 0.29-0.33, supine 0.34, jump_any 0.42, split 0.47, kick_l 0.67, flamingo_r 0.78. Results of the TD3 upper bounds and of the fine-tuning on one task are still running.',
@@ -538,6 +622,8 @@ def classify(j):
     """(family, variant, order, panel, series): jobs with the same family and variant are repeats of one configuration.
     On the Results tab a panel is one chart and a series is one line of it (same series name = same color across panels)."""
     cmd = j['command'] or ''
+    if sn_is(cmd):
+        return sn_class(cmd)
     if rw_is(cmd):
         return rw_class(cmd)
     if is_final(cmd):

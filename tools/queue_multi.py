@@ -73,3 +73,9 @@ if __name__ == '__main__':
         PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
         cm = ['python fb_continual_temp.py env_name=walker checkpoint=%s tasks=%s bench=final num_evals=20 ridge=0 eval_ckpt=%s eval_z=random model_dir=models/multi/m4_rand_%s' % (c, T8, c, n) for n, c in (('pre', PRE), ('mb300', MB1), ('ctrl', CT))]
         subprocess.run([sys.executable, Q, 'add', 'm4_randz', '--time', '1:00:00', '--title', 'Random-latent control: return of the policy with a random z on all 8 tasks (pretrained, mu_b 300 stream, control stream)'] + sum([['--cmd', c] for c in cm], []), check=True)
+    if sys.argv[1] == 'm5':
+        # variants of the 8-task joint run (100% task-driven z, mu_b 300 stream seed 1), one change each
+        MB1 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        V = [('m5_sp0', 'z_task_spread=0', 'spread 0 (exact task latents)'), ('m5_lr3e4', 'lr=3e-4', 'lr 3e-4'), ('m5_bs4096', 'batch_size=4096', 'batch 4096')]
+        for n, ex, what in V:
+            add(n, 'Joint F + actor, 8 tasks, 100%% task-driven z, B frozen: %s (mu_b 300 stream, 500k updates)' % what, [(n, MB1)], extra='multi_task_frac=1 ' + ex)

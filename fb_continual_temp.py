@@ -723,7 +723,7 @@ if __name__ == '__main__':
     TASK_IDX = [LABELS.index(t) for t in TASKS]
     print('continual stream:', TASKS)
 
-    BATCH_SIZE = 1024
+    BATCH_SIZE = int(kwargs['batch_size']) if 'batch_size' in kwargs else 1024      # update batch size (default unchanged)
     # Number of benchmarks rolled out in parallel during eval (each one needs NUM_EVALS env instances)
     EVAL_CHUNK = int(kwargs['eval_chunk']) if 'eval_chunk' in kwargs else N_BENCH
     EVAL_BENCH = list(TASK_IDX) if EVAL_STREAM_ONLY else list(range(N_BENCH))      # benchmark tasks of the fresh evaluation

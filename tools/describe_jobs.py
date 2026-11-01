@@ -351,7 +351,7 @@ def ep_class(cmd):
     b, q = float(mb), float(mq)
     order = b / 1e5 + q
     if ',' in task:       # a stream: shown in the stream table, not in the charts
-        sk = 's1' if task.startswith('run,') else 's2'
+        sk = 's1' if task.startswith('run,') else ('s8' if task.count(',') == 7 else 's2')
         return 'eps-study', 'stream %s: %s' % (sk, lab), 1000 + order, '', '', False
     if task != 'run':
         pn = 'fine-tuning on %s' % task

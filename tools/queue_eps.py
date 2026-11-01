@@ -82,6 +82,13 @@ E6 = [('s1', 'a099_mb100', 'alpha=0.99 ' + mu(100, '0.5')), ('s1', 'a099_mb300',
 STREAMS_E6 = {'s1': 'run,jump_any,flamingo_r,supine', 's2': 'flamingo_r,split,jump_any,run'}
 WAVES['e6'] = {'e6_%s_%s' % (sk, n): ('stream %s (%s), %s, 2 seeds' % (sk, STREAMS_E6[sk].replace(',', ' > '), f), [('e6_stream_%s_%s' % (sk, n), STREAMS_E6[sk], f, 2)]) for sk, n, f in E6}
 
+# e7 (after e6: alpha 0.99 + mu_b 100/300 + mu_q 0.5 keeps what earlier stages learned, stored latents stay sane): (1) a stream of all 8 tasks, 2 seeds: control, alpha 0.99 + mu_b 100 + mu_q 0.5,
+# alpha 0.99 + mu_b 300 + mu_q 0.5; (2) ablations on stream s1 (2 seeds): alpha 0.99 + mu_b 100 without mu_q, alpha 0.99 + mu_q 0.5 without mu_b.
+S8 = 'supine,kick_l,flamingo_r,split,jump_any,stand,run,flip'
+E7 = [('s8', 'ctrl', mu(0, 0), S8), ('s8', 'a099_mb100', 'alpha=0.99 ' + mu(100, '0.5'), S8), ('s8', 'a099_mb300', 'alpha=0.99 ' + mu(300, '0.5'), S8),
+      ('s1', 'a099_mb100_noq', 'alpha=0.99 ' + mu(100, 0), 'run,jump_any,flamingo_r,supine'), ('s1', 'a099_mb0_mq05', 'alpha=0.99 ' + mu(0, '0.5'), 'run,jump_any,flamingo_r,supine')]
+WAVES['e7'] = {'e7_%s_%s' % (sk, n): ('stream %s (%s), %s, 2 seeds' % (sk, tl.replace(',', ' > '), f), [('e7_stream_%s_%s' % (sk, n), tl, f, 2)]) for sk, n, f, tl in E7}
+
 STREAMS = {'s1': 'run,jump_any,flamingo_r,supine', 's2': 'flamingo_r,split,jump_any,run'}
 
 

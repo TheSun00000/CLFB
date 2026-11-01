@@ -42,3 +42,6 @@ Family 'eps-study' (first in the Results tab): rows of 3 charts side by side = e
 Wave e3 (jobs 1813548-50, 42 runs): mu_q 0.5 on 7 tasks, mu_b 100 + mu_q 0.5 on 8 tasks, mu_b 100 + mu_q 1 and the controls on stand, flip, kick_l. Goal: one setting that passes on all 8 tasks.
 Stop rule: a (mu_b, mu_q) with * on all 8 tasks (2 seeds) -> stop and report; else look at the failing tasks before another wave (max 2 more waves).
 Tracker pushed with e1 + e2 (family 'eps-study'); e3 children are added when the jobs start.
+
+### 2026-11-01 - parallel wave e3b (user: up to 10 jobs at a time is fine)
+Jobs 1813770, 1813771, 1813773, 1813774 (8 runs each, ~55 min): mu_b 100 + mu_q 0.3 and mu_b 300 + mu_q 0.5 on the 8 tasks (2 seeds). From now on waves are split over up to 10 jobs of at most ~8-10 runs.

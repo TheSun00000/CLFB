@@ -28,9 +28,34 @@ def fl(r, k):
         return None
 
 
+def print_streams(streams):
+    """Streams of tasks (one stage each): eps of the 8 tasks at the end of every stage (mean over the repeats), change vs the pretrained model,
+    and for the tasks already learned the eps of the STORED latent carried through the T's (tracked)."""
+    for cfg in sorted(streams):
+        rs = streams[cfg]
+        n = min(len(r['ends']) for r in rs)
+        tl = rs[0]['tasks']
+        print()
+        print('stream %s (%d runs): %s' % (cfg, len(rs), ' -> '.join(tl)))
+        print('%-20s ' % 'eps (change vs pretrained)' + ' '.join('%-12s' % t for t in TASKS))
+        print('%-20s ' % 'pretrained' + ' '.join('%-12s' % ('%.3f' % st.mean(r['base'][t] for r in rs)) for t in TASKS))
+        for k in range(n):
+            cells = []
+            for t in TASKS:
+                v = [r['ends'][k][t] for r in rs if r['ends'][k][t] is not None]
+                b = [r['base'][t] for r in rs if r['ends'][k][t] is not None]
+                cells.append('%-12s' % (('%.3f(%+.2f)%s' % (st.mean(v), st.mean(v) - st.mean(b), '*' if t in tl[:k + 1] else '')) if v else '.'))
+            print('%-20s ' % ('after stage %d (%s)' % (k + 1, tl[k])) + ' '.join(cells))
+        cells = []
+        for t in TASKS:
+            v = [r['ends'][n - 1]['tracked'][t] for r in rs if r['ends'][n - 1]['tracked'].get(t) is not None]
+            cells.append('%-12s' % ('%.3f' % st.mean(v) if v else '.'))
+        print('%-20s ' % 'stored latents (end)' + ' '.join(cells) + '   (* = learned in the stream)')
+
+
 def main():
     prefix = sys.argv[1] if len(sys.argv) > 1 else ''
-    runs = {}
+    runs, streams = {}, {}
     for d in sorted(glob.glob('hpc/logs/*FBcontinual-*')):
         try:
             info = open(d + '/info.txt').read()
@@ -48,15 +73,24 @@ def main():
         end = [r for r in ev if r['tag'] == 'end']
         if not base or not end:
             continue
-        task = re.search(r"'tasks': '?([a-z_]+)", info).group(1)
+        tl = re.search(r"'tasks': '?([a-z_,\[\] ]+?)'?[,}]", info).group(1).strip('[] ').replace(' ', '')
+        if ',' in tl:      # a stream of tasks, one stage each: kept apart (see the stream table)
+            streams.setdefault(cfg, []).append({'tasks': tl.split(','), 'base': {t: fl(base[0], t + '_fresh_eps') for t in TASKS},
+                                               'ends': [{t: fl(r, t + '_fresh_eps') for t in TASKS} | {'tracked': {t: fl(r, t + '_tracked_eps') for t in TASKS}} for r in end]})
+            continue
+        task = tl
         b, e = base[0], end[-1]
         steps = {int(float(r['step'])): r for r in ev if r['tag'] in ('mid', 'end')}
         mu = (float(re.search(r'mu_b=(\S+)', info).group(1)) if 'mu_b=' in info else 0.0, float(re.search(r'mu_q=(\S+)', info).group(1)) if 'mu_q=' in info else 0.0)
         runs.setdefault(cfg, []).append({
             'task': task, 'mu': mu, 'base': {t: fl(b, t + '_fresh_eps') for t in TASKS}, 'end': {t: fl(e, t + '_fresh_eps') for t in TASKS},
             'trained_steps': {s: fl(r, task + '_fresh_eps') for s, r in sorted(steps.items())}})
-    if not runs:
+    if not runs and not streams:
         sys.exit('no finished run with model_dir=models/eps/ in hpc/logs')
+    if streams:
+        print_streams(streams)
+    if not runs:
+        return
     refs = {}       # trained task -> mean trained eps of its control (no retention terms)
     for c, rs in runs.items():
         if ('ctrl' in c) or all(r['mu'] == (0.0, 0.0) for r in rs):

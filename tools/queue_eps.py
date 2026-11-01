@@ -69,8 +69,29 @@ def add(job, title, items, wave):
     subprocess.run(args, check=True)
 
 
+STREAMS = {'s1': 'run,jump_any,flamingo_r,supine', 's2': 'flamingo_r,split,jump_any,run'}
+
+
+def e4_wave(settings):
+    """Confirmation round (settings = [(mu_b, mu_q), ...] that passed in e3): a third seed of every setting and of the control on the 8 tasks (4 runs per job),
+    and two streams of 4 tasks, one stage each (30k updates), with every setting and the control, 2 seeds (2 runs per job, ~30 min each)."""
+    jobs = {}
+    singles = [('e4_ctrl', mu(0, 0))] + [('e4_mb%s_mq%s' % st, mu(*st)) for st in settings]
+    items = [('%s_%s' % (n, t), t, f, 1) for n, f in singles for t in TASKS8]
+    for k in range(0, len(items), 4):
+        jobs['e4_single_%d' % (k // 4)] = ('third seed on single tasks (%d-%d)' % (k + 1, min(k + 4, len(items))), items[k:k + 4])
+    n = 0
+    for sk, tl in STREAMS.items():
+        for cn, f in [('ctrl', mu(0, 0))] + [('mb%s_mq%s' % st, mu(*st)) for st in settings]:
+            jobs['e4_stream_%d' % n] = ('stream %s (%s), %s, 2 seeds' % (sk, tl.replace(',', ' > '), cn), [('e4_stream_%s_%s' % (sk, cn), tl, f, 2)])
+            n += 1
+    return jobs
+
+
 def main():
     wave = sys.argv[1]
+    if wave == 'e4':
+        WAVES['e4'] = e4_wave([tuple(x.split(',')) for x in sys.argv[2].split(';')])      # e.g. "100,0.5;300,0.5"
     for job, (title, items) in WAVES[wave].items():
         add(job, title, items, wave)
 

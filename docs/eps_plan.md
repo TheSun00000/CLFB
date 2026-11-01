@@ -45,3 +45,10 @@ Tracker pushed with e1 + e2 (family 'eps-study'); e3 children are added when the
 
 ### 2026-11-01 - parallel wave e3b (user: up to 10 jobs at a time is fine)
 Jobs 1813770, 1813771, 1813773, 1813774 (8 runs each, ~55 min): mu_b 100 + mu_q 0.3 and mu_b 300 + mu_q 0.5 on the 8 tasks (2 seeds). From now on waves are split over up to 10 jobs of at most ~8-10 runs.
+
+### 2026-11-01 - waves e3 / e3b result (jobs 1813548-50, 1813770-74; 2 seeds on all 8 tasks)
+Success (trained eps <= control + 0.03, no other task rises by more than 0.03) on ALL 8 tasks for: mu_q 0.5 alone; mu_b 100 + mu_q 0.5; mu_b 300 + mu_q 0.5. Failing: mu_q 0.3 + mu_b 100 (run +0.086, flip +0.135: too weak); mu_q 1 + mu_b 100 fails only on split (trained eps .095 against .057).
+Trained eps (control -> 0.5 / 100+0.5 / 300+0.5): stand .027 -> .044/.035/.039; run .036 -> .055/.046/.042; flip .048 -> .070/.056/.058; supine .033 -> .042/.039/.041; jump_any .030 -> .049/.035/.035; kick_l .037 -> .042/.039/.042; split .057 -> .075/.074/.069; flamingo_r .043 -> .066/.062/.062.
+Largest rise of the others: control +0.013 to +0.135; with the three settings -0.051 to +0.010 (other tasks flat or lower).
+Wave e4 (confirmation, jobs 1814260-69 + 6 queued): third seed on the 8 single tasks for the control and the three settings; two 4-task streams (run > jump_any > flamingo_r > supine; flamingo_r > split > jump_any > run), one stage of 30k each,
+control and the three settings, 2 seeds: do the earlier tasks keep their eps (fresh and stored latent) while the later ones are learned? Stop after e4 unless a setting fails there.

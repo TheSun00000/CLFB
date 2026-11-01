@@ -36,3 +36,5 @@ Newest first. One entry per work session: what was done, what was learned, what 
 Fine-tuned FB_run loses supine (-962), flamingo_r (-418), split (-285). 12 runs in 3 waves (jobs 1802637-40, 1803564-67, 1804737-40). Findings: wave 1 mu_b/mu_q alone does nothing for the returns
 (actor trained only on z_run); wave 2 actor_z_task_frac 0.5 restores supine, mu_b=1000 restores eps of all tasks, flamingo_r 694; wave 3 mu_q up to 0.1 does not help and hurts flamingo_r.
 Open: split stays ~600 (vs 962). Ideas not tried: stored atoms of nu, replay of old latents in the actor loss. Tracker not updated by the script; see docs/retention_plan.md.
+Morning 2026-11-01: user stopped all experiments (nothing was running; the autonomous wake-up cron was deleted) and wants to revise what mu_b and mu_q do before more runs.
+Tracker: snapshot/jobs and curves pushed, 23 tracking docs + family 'retention' (summary, setup) written; the control ret_af05_nor (job 1803567.0, mu_b=mu_q=0) is not tracked (the retention classifier requires mu_b or mu_q > 0).

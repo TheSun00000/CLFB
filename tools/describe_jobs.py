@@ -293,18 +293,23 @@ def rw_name(cmd):
     return m.group(1) if m else ''
 
 
+def rw_var(cmd):
+    """Variant label: actor_z_task_frac (share of actor updates on the run latent; 1.0 = the best setup), mu_b, mu_q."""
+    return 'actor %s, mu_b %s, mu_q %s' % (flag(cmd, 'actor_z_task_frac', '1.0'), flag(cmd, 'mu_b'), flag(cmd, 'mu_q'))
+
+
 def rw_text(cmd):
     if flag(cmd, 'eval_ckpt'):
         return ('Retention: evaluation of %s on the 8 tasks' % rw_name(cmd), 'No training. Zero-shot return and reward error of the model %s on each of the 8 tasks.' % rw_name(cmd))
-    return ('Retention: best setup on run, mu_b %s, mu_q %s' % (flag(cmd, 'mu_b'), flag(cmd, 'mu_q')),
-            'The best setup of the return study (lam 100, focus 0.5, noise 0.2, actor focus 1.0; 500k updates, 100k labelled states) fine-tuned on run WITH the retention terms mu_b=%s (loss of the span of B for the pretrained family of rewards) and mu_q=%s (change of the values of that family). Question: do the other tasks keep their performance while run is learned?' % (flag(cmd, 'mu_b'), flag(cmd, 'mu_q')))
+    return ('Retention: best setup on run, %s' % rw_var(cmd),
+            'The best setup of the return study (lam 100, focus 0.5, noise 0.2, actor focus %s; 500k updates, 100k labelled states) fine-tuned on run WITH the retention terms mu_b=%s (loss of the span of B for the pretrained family of rewards) and mu_q=%s (change of the values of that family). Question: do the other tasks keep their performance while run is learned?' % (flag(cmd, 'actor_z_task_frac', '1.0'), flag(cmd, 'mu_b'), flag(cmd, 'mu_q')))
 
 
 def rw_class(cmd):
     ev = bool(flag(cmd, 'eval_ckpt'))
-    v = ('Evaluation, ' + rw_name(cmd)) if ev else 'mu_b %s, mu_q %s' % (flag(cmd, 'mu_b'), flag(cmd, 'mu_q'))
+    v = ('Evaluation, ' + rw_name(cmd)) if ev else rw_var(cmd)
     try:
-        order = float(flag(cmd, 'mu_b', '0')) + 0.001 * float(flag(cmd, 'mu_q', '0')) + (1000 if ev else 0)
+        order = float(flag(cmd, 'mu_b', '0')) + 0.001 * float(flag(cmd, 'mu_q', '0')) + 10000 * (1 - float(flag(cmd, 'actor_z_task_frac', '1.0'))) + (100000 if ev else 0)
     except ValueError:
         order = 0
     return 'retention', v, order, '', v, False
@@ -419,7 +424,7 @@ FAMILIES = {
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 SETUP = {
-    'retention': 'Start: the pretrained walker FB model. Every run fine-tunes it on the task run for 500k updates with the best setup of the return study (reward term L_rec lam 100 on 100k labelled states, focus 0.5, noise 0.2, actor focus 1.0, L_FB and orthonormality on) plus the retention terms: mu_b = the loss of the span of B (the share of reward energy of the old family of rewards that B can no longer represent), mu_q = the change of the values (F^T z) of that family. With one task and no stored latents the old family is every reward in the span of the pretrained B (latents drawn uniformly on the sphere). Then each model is evaluated zero-shot on the 8 tasks of the list (latent inferred from 10k labelled states, 20 episodes) and compared with the pretrained model and with FB_run (no retention). Target: run return >= 0.9 x FB_run, the tasks the pretrained model does well (>= 300) keep >= 85% of their return, reward error of the unaligned tasks within +0.03.',
+    'retention': 'Start: the pretrained walker FB model. Every run fine-tunes it on the task run for 500k updates with the best setup of the return study (reward term L_rec lam 100 on 100k labelled states, focus 0.5, noise 0.2, actor focus 1.0 unless the variant says otherwise: "actor x" = share of actor updates on the run latent, the rest on uniform latents; L_FB and orthonormality on) plus the retention terms: mu_b = the loss of the span of B (the share of reward energy of the old family of rewards that B can no longer represent), mu_q = the change of the values (F^T z) of that family. With one task and no stored latents the old family is every reward in the span of the pretrained B (latents drawn uniformly on the sphere). Then each model is evaluated zero-shot on the 8 tasks of the list (latent inferred from 10k labelled states, 20 episodes) and compared with the pretrained model and with FB_run (no retention). Target: run return >= 0.9 x FB_run, the tasks the pretrained model does well (>= 300) keep >= 85% of their return, reward error of the unaligned tasks within +0.03.',
     'final-tasks': 'B-only learnability: B alone is fitted from the pretrained B on each task (fixed readout, 30k steps) and the held-out reward error is measured. TD3 upper bound: offline TD3 from scratch on the true reward of each task, 1M updates, one run. Fine-tuning: the best setup of the return study (lam 100, focus 0.5, noise 0.2, actor focus 1.0; 500k updates, 100k labelled states, no retention terms) trained on one task at a time, the return on that task evaluated during training, then every model evaluated zero-shot on all 8 tasks (latent inferred from 10k labelled states, 20 episodes). Experiments are submitted automatically from a local queue (tools/queue.py).',
     'return-focus': 'All fine-tuned models start from the same pretrained FB model (the "pretrained model" row of the tables). Each is trained for 500k updates on one task, run, with 100k labelled states of run: B, F and the actor are all updated (the FB objective, the orthonormality term, and the reward term L_rec that regresses the reward of run on B). In addition the latent of run is mixed into the latents used to train F and the actor (focus). The retention terms are off: there is only one task. Evaluation: zero-shot return, the latent being inferred from 10k labelled states of the task, 20 episodes of 1000 steps.',
     'lrec-vs-fit': 'One stage on the task run, from the pretrained walker model. The reference (dashed, "E3 phase 1") is B alone regressed on the reward with a fixed readout for 30k steps. L_rec is the reward term of the continual method that does the same regression inside the joint training with L_FB and the orthonormality term. eps is the reward reconstruction error on held-out states (lower is better; 1 means nothing is explained). In the run names: lam = weight of L_rec, ortho = coefficient of the orthonormality term, prefit = a B-only fit before the joint training, resolved readout = the readout is re-solved from B at every step (the current method; otherwise fixed), labels = labelled states (10k unless stated).',
@@ -431,7 +436,10 @@ SETUP = {
 
 
 EXTRA = {
-    'retention': {'standalone': True},
+    'retention': {
+        'standalone': True,
+        'summary': 'Not solved. Fine-tuning on run (FB_run) loses supine (981 -> 19), flamingo_r (813 -> 395) and split (962 -> 676). Training the actor on uniform latents half of the time (actor 0.5) restores supine (~980, also with no retention term: supine is mostly default behaviour of the policy). mu_b 300-1000 brings the reward error of all old tasks back to the pretrained level and lifts flamingo_r to ~690, but split stays at 570-680 (59-70% of 962) in every setting, and mu_q above 0.01 does not help and drops flamingo_r to ~330. The run itself is kept (394-450, FB_run 441). 12 runs, 3 waves (jobs 1802637-40, 1803564-67, 1804737-40). The mu_b and mu_q terms need to be revised: with one task and no stored latents they act on a uniform sphere of latents, which does not protect the latent of split. Per-task numbers: docs/retention_plan.md (Log), evaluations in the Experiments tab.',
+    },
     'final-tasks': {
         'standalone': True,
         'summary': 'B alone can encode every task of the list: after a fit of B from the pretrained B, the held-out reward error is at most 0.013 for all 8 tasks with 100k labelled states, and at most 0.04 with 10k, except flamingo_r (0.11), the rarest task (satisfied in 9% of the states). The pretrained B encodes none of them well (0.29-0.78): the three built-in tasks 0.29-0.33, supine 0.34, jump_any 0.42, split 0.47, kick_l 0.67, flamingo_r 0.78. Results of the TD3 upper bounds and of the fine-tuning on one task are still running.',

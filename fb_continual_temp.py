@@ -68,6 +68,7 @@ Flags:
     eval_each_steps=0        if > 0: also evaluate (fresh zero-shot only) every this many chunks inside a stage
     eval_baseline=1          evaluate the pretrained checkpoint (stage 0) before the first stage
     eval_fresh=1             0 = skip the fresh zero-shot evaluation of every env task (much faster evals)
+    q_loss=1                 0: no Q loss on F (with fb_objective=0 ortho_coef=0: only mu_b R^B and mu_q R^Q train F and B). Default 1 = unchanged.
     fb_objective=1           1: critic loss = L_FB + q_loss_coef * Q loss (+ ortho_coef * ortho)
                              0: critic loss = Q loss only (+ ortho_coef * ortho). L_FB is not computed (branch skipped).
                              ortho_coef=0 skips the orthonormality loss; lam=0 / mu_b=0 / mu_q=0 skip L_rec / R^B / R^Q.
@@ -1334,8 +1335,11 @@ if __name__ == '__main__':
         fb_config = dataclasses.replace(fb_config, b_decay_steps=STEPS_PER_STAGE)
     if 'fb_objective' in kwargs:
         fb_config = dataclasses.replace(fb_config, fb_objective=bool(int(kwargs['fb_objective'])))
+    if 'q_loss' in kwargs:
+        fb_config = dataclasses.replace(fb_config, q_loss=bool(int(kwargs['q_loss'])))
     fb_config = dataclasses.replace(fb_config, finetune=FINETUNE)
-    assert fb_config.fb_objective or fb_config.q_loss, 'fb_objective=0 needs the Q loss (q_loss=True)'
+    assert (fb_config.fb_objective or fb_config.q_loss or fb_config.ortho_coef > 0 or fb_config.mu_b > 0 or fb_config.mu_q > 0
+            ), 'no loss on F and B: fb_objective=0 needs q_loss=1, ortho_coef>0, mu_b>0 or mu_q>0'
     if FINETUNE != 'none':
         print(f'finetune={FINETUNE}: z = fixed task latent; fb_objective, ortho_coef, lam, mu_b, mu_q, alpha, '
               f'z_task_*, freeze_b, freeze_fb and mix_ratio are ignored')

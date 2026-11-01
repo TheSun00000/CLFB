@@ -4,7 +4,7 @@ theta_new = theta_old at the start of the stage and nothing asks the model to le
 (zero-shot returns on the 8 tasks close to the pretrained model's). Groups:
   A: pretraining loss on (L_FB + Q loss + ortho), mu_b / mu_q varied.   B: fb_objective=0 (Q loss + ortho, no L_FB).
   C: fb_objective=0 q_loss=0 ortho_coef=0: the only signal on F and B is mu_b * R^B + mu_q * R^Q.
-Usage: python tools/queue_sanity.py [s1|s2]     (s1 default: the 12 entries above; s2: the estimator fix, see docs/sanity_plan.md)
+Usage: python tools/queue_sanity.py [s1|s2|s3]     (s1 default: the 12 entries above; s2: the estimator fix, see docs/sanity_plan.md)
 """
 import subprocess, sys, os
 
@@ -40,9 +40,20 @@ S2 = {
     'san2_C3f':  (C_ON + ' est_same=1 mu_b=100 mu_q=0.1',       'C3 with Sigma_old on the same states'),
 }
 
+# s3: what moves the model when nothing asks it to? (s1/s2: B drifts with the pretraining loss alone (A0, A0b), and the return on split falls by ~130-160 in
+# every run where F and B hardly move (C), so the actor is suspected.) freeze_fb=1: only the actor is trained. Steps and lr varied on the control.
+S3 = {
+    'san3_act200a': ('freeze_fb=1 mu_b=0 mu_q=0',                          'only the actor trained, F and B frozen, 200k updates'),
+    'san3_act200b': ('freeze_fb=1 mu_b=0 mu_q=0',                          'repeat (noise)'),
+    'san3_act50':   ('freeze_fb=1 mu_b=0 mu_q=0 steps_per_stage=50000',    'only the actor trained, 50k updates (does the drift grow with the steps?)'),
+    'san3_A0_20k':  ('mu_b=0 mu_q=0 steps_per_stage=20000',                'control A0 for 20k updates (is the B drift immediate: Adam restart?)'),
+    'san3_A0_50k':  ('mu_b=0 mu_q=0 steps_per_stage=50000',                'control A0 for 50k updates'),
+    'san3_A0_lr':   ('mu_b=0 mu_q=0 lr=0.00003',                           'control A0 with lr / 3 (does a smaller Adam step reduce the drift?)'),
+}
+
 
 def main():
-    runs = S2 if len(sys.argv) > 1 and sys.argv[1] == 's2' else RUNS
+    runs = {'s2': S2, 's3': S3}.get(sys.argv[1] if len(sys.argv) > 1 else 's1', RUNS)
     for name, (flags, why) in runs.items():
         train = 'python fb_continual_temp.py env_name=walker checkpoint=$CKPT tasks=run %s %s model_dir=models/ret/%s' % (BASE, flags, name)
         ev = 'python fb_continual_temp.py env_name=walker checkpoint=$CKPT tasks=run bench=final num_evals=20 eval_ckpt=models/ret/%s/fb_stage_1_run.pickle' % name

@@ -68,6 +68,8 @@ Flags:
     eval_each_steps=0        if > 0: also evaluate (fresh zero-shot only) every this many chunks inside a stage
     eval_baseline=1          evaluate the pretrained checkpoint (stage 0) before the first stage
     eval_fresh=1             0 = skip the fresh zero-shot evaluation of every env task (much faster evals)
+    est_same=0               1: Sigma_old (R^B, R^Q) is re-estimated at every step on the same n_est states as Sigma_theta and A, so that R^B = R^Q = 0
+                             exactly at theta = theta_old (sanity runs showed a noise floor R^B ~0.07, R^Q ~2000 with Sigma_old on other states). Default 0.
     q_loss=1                 0: no Q loss on F (with fb_objective=0 ortho_coef=0: only mu_b R^B and mu_q R^Q train F and B). Default 1 = unchanged.
     fb_objective=1           1: critic loss = L_FB + q_loss_coef * Q loss (+ ortho_coef * ortho)
                              0: critic loss = Q loss only (+ ortho_coef * ortho). L_FB is not computed (branch skipped).
@@ -895,6 +897,7 @@ if __name__ == '__main__':
         mu_q:                float = 0.01     # weight of R^Q (not dimensionless: it is a squared error on values)
         alpha:               float = 0.5      # weight of the atoms in nu
         n_est:               int   = 4096     # states of D per step to estimate Sigma_theta, A_theta
+        est_same:            bool  = False    # Sigma_old re-estimated at every step on the n_est states used for Sigma_theta and A (default: n_big states, once per stage)
         ridge:               float = 1e-5     # ridge on every covariance before inversion
         cross_fit:           bool  = False    # cross-fitted L_rec
         rec_fixed_w:         bool  = False    # L_rec with the fixed readout w_fit of the stage instead of the re-solved one
@@ -1204,7 +1207,10 @@ if __name__ == '__main__':
                     B_new_est = self.backward_net.apply({'params': fb_params['backward']}, obs_est)
                     B_old_est = jax.lax.stop_gradient(
                         self.backward_net.apply({'params': sd.old_params['backward']}, obs_est))
-                    Sigma_th, T, M = old_family_matrices(B_new_est, B_old_est, sd.sigma_old_inv, cfg.ridge)
+                    sig_inv = sd.sigma_old_inv
+                    if cfg.est_same:     # Sigma_old on the SAME n_est states as Sigma_theta and A: T = I, M = 0 exactly when theta = theta_old
+                        sig_inv = jnp.linalg.inv(B_old_est.T @ B_old_est / B_old_est.shape[0] + cfg.ridge * jnp.eye(B_old_est.shape[1]))
+                    Sigma_th, T, M = old_family_matrices(B_new_est, B_old_est, sig_inv, cfg.ridge)
 
                 if cfg.lam > 0:
                     # ---- L_rec on the labeled set (whole set at every step, detached coefficient)
@@ -1223,7 +1229,7 @@ if __name__ == '__main__':
 
                 if cfg.mu_b > 0:
                     # ---- R^B (closed form, differentiated through A_theta and Sigma_theta)
-                    r_b   = retention_basis_loss(z_ret, M, sd.sigma_old_inv)
+                    r_b   = retention_basis_loss(z_ret, M, sig_inv)
                     total = total + cfg.mu_b * r_b
                     m['old_rewards_lost_fraction'] = r_b
 
@@ -1335,6 +1341,8 @@ if __name__ == '__main__':
         fb_config = dataclasses.replace(fb_config, b_decay_steps=STEPS_PER_STAGE)
     if 'fb_objective' in kwargs:
         fb_config = dataclasses.replace(fb_config, fb_objective=bool(int(kwargs['fb_objective'])))
+    if 'est_same' in kwargs:
+        fb_config = dataclasses.replace(fb_config, est_same=bool(int(kwargs['est_same'])))
     if 'q_loss' in kwargs:
         fb_config = dataclasses.replace(fb_config, q_loss=bool(int(kwargs['q_loss'])))
     fb_config = dataclasses.replace(fb_config, finetune=FINETUNE)

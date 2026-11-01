@@ -48,3 +48,13 @@ if __name__ == '__main__':
         E = 'models/eps/'
         runs = [('m2_s8mb300_run_sp02', E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'), ('m2_s8ctrl_run_sp02', E + 'e7_stream_s8_ctrl_r1/fb_stage_8_flip.pickle')]
         add('m2_1', 'Sanity: F + actor on 100% run latent from the 8-task stream checkpoints (mu_b 300 + mu_q 0.5, and control), 500k updates', runs, extra=X)
+    if sys.argv[1] == 'm3':
+        # one task at a time, 100% of its latent (spread 0.2), from the 8-task stream checkpoints (final stage): mu_b 300 + mu_q 0.5 and control; run is done in m2
+        E = 'models/eps/'
+        CK = {'mb300': E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle', 'ctrl': E + 'e7_stream_s8_ctrl_r1/fb_stage_8_flip.pickle'}
+        T = ['stand', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+        runs = [('m3_%s_%s' % (c, t), CK[c], t) for t in T for c in CK]
+        for i in range(0, len(runs), 3):
+            chunk = runs[i:i + 3]
+            add('m3_%d' % (i // 3), 'One task at a time, 100%% of its latent, stream checkpoints: ' + ', '.join(n[3:] for n, _, _ in chunk), [(n, c) for n, c, _ in chunk],
+                extra={n: 'tasks=%s multi_task_frac=1 eval_stream_only=1 num_evals=10' % t for n, _, t in chunk})

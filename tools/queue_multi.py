@@ -42,3 +42,9 @@ if __name__ == '__main__':
         PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
         runs = [('m2_pre_run_sp02', PRE), ('m2_pre_run_sp0', PRE), ('m2_mq05_run_sp02', 'models/eps/e2_mq0.5_r1/fb_stage_1_run.pickle')]
         add('m2_0', 'Sanity: F + actor on 100% run latent (pretrained spread 0.2 and 0, mu_q 0.5 run checkpoint), 500k updates', runs, extra={n: X + (' z_task_spread=0' if n.endswith('sp0') else '') for n, _ in runs})
+    if sys.argv[1] == 'm2b':
+        # same sanity on STREAM checkpoints (final stage of the 8-task stream): retention setting mu_b 300 + mu_q 0.5, and the control stream
+        X = 'tasks=run multi_task_frac=1 eval_stream_only=1 num_evals=10'
+        E = 'models/eps/'
+        runs = [('m2_s8mb300_run_sp02', E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'), ('m2_s8ctrl_run_sp02', E + 'e7_stream_s8_ctrl_r1/fb_stage_8_flip.pickle')]
+        add('m2_1', 'Sanity: F + actor on 100% run latent from the 8-task stream checkpoints (mu_b 300 + mu_q 0.5, and control), 500k updates', runs, extra=X)

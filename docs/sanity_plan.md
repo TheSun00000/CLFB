@@ -36,3 +36,14 @@ Pretrained eps (stand run flip supine jump_any kick_l split flamingo_r): .298 .3
 - Final R^B/R^Q: A1 .067, A3 .082/1420, A4 -.002/1386, C1 .015, C3 .029/2079, C2 1228: all at the noise floor (R^B ~0.07, R^Q ~2000), none near 0.
 Decision (rule 1 of the plan): test the estimator fix. New flag `est_same=1`: Sigma_old re-estimated at every step on the n_est states used for Sigma_theta and A (T = I, M = 0 exactly at theta_old).
 Wave s2 (8 runs, jobs 1807955-62): A0 repeat (noise), est_same=1 on A1, A2, A3, A4, B3, C2, C3. Expect R^B ~0 and R^Q ~0 at the first chunks and a smaller effect of mu_q alone on the returns.
+
+### 2026-11-01 ~09:30 - wave s2 result (8 runs; est_same=1 and the control repeat)
+- Noise: control A0 vs repeat A0b: stand +132/+57, split -58/-90, flamingo -52/-83, eps .48/.43 on stand. So single-run return deltas of +-50-100 are noise; B drifts in both (eps .3 -> .43-.49).
+- Fix works on the estimator: final R^Q 1228-2079 -> 159 (C2f, C3f), 633 (A2f), 487 (A3f), 544 (A4f), 1052 (B3f); R^B 0.000-0.012 in C3f/A4f/B3f. Still R^B ~0.07 in A1f/A3f: with the pretraining loss on and mu_b=100 there is a real pull on B (A4f with mu_b=1000: 0.007).
+  The remaining R^Q ~159 in C (B unchanged, T = I) is probably Adam amplifying float32 noise on a loss that is at its minimum (hypothesis, not tested).
+- mu_q alone with the pretraining loss no longer hurts the aligned tasks: A2f stand +64, flip -19, supine -42 (A2: -144, -175, -140), eps back to pretrained (.295 .340 .358 vs A2 .248 .315 .306). Supports the reading that the old harm came from T != I.
+- B: eps stays at pretrained level in the runs with mu_b=1000 (A4f .312 .356 .347 ..) and in C/B3f; with mu_b=100 and L_FB on (A1f, A3f) it drifts (.43-.45 / .25-.30).
+- Returns of split: -42..-305 in all runs with the pretraining loss and -130..-161 in the five C runs (F and B at the pretrained values), flamingo_r -347..+119. Not removed by the fix.
+Conclusion s2: the estimator fix removes the noise floor and the spurious harm of mu_q; what remains (split, flamingo returns, B drift with L_FB) does not depend on mu_b / mu_q.
+Wave s3 (last allowed by the plan, 6 runs): `freeze_fb=1` (only the actor trained) 200k x2 and 50k; control A0 at 20k and 50k updates; A0 with lr/3.
+Question answered by s3: is the split loss the actor's own drift (freeze_fb), does it grow with steps, and is the B drift an immediate effect of restarting (Adam / target reset) or accumulates.

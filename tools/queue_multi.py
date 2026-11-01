@@ -14,9 +14,9 @@ def cmdline(job, ckpt, steps, every, extra=''):
     return 'python fb_continual_temp.py checkpoint=%s %s steps_per_stage=%d eval_each_steps=%d %s model_dir=models/multi/%s' % (ckpt, BASE, steps, every, extra, job)
 
 
-def add(job, title, runs, tlimit='1:55:00', steps=500000, every=50):
+def add(job, title, runs, tlimit='1:55:00', steps=500000, every=50, extra=''):
     # one job = several runs [(run name, checkpoint)] one after the other
-    cmds = [cmdline(n, c, steps, every) for n, c in runs]
+    cmds = [cmdline(n, c, steps, every, extra if isinstance(extra, str) else extra[n]) for n, c in runs]
     args = [sys.executable, Q, 'add', job, '--time', tlimit, '--title', title]
     for c in cmds:
         args += ['--cmd', c]
@@ -35,3 +35,10 @@ if __name__ == '__main__':
         runs = [st('mb300', 1), st('mb300', 2), st('ctrl', 1), ('m1_pretrained', PRE)] + [sing(k, t) for k in ('mq05', 'mb100') for t in T]
         for i in range(0, len(runs), 3):
             add('m1_%d' % (i // 3), 'Multi-task F + actor, 500k updates, B frozen: ' + ', '.join(n[3:] for n, _ in runs[i:i + 3]), runs[i:i + 3])
+
+    if sys.argv[1] == 'm2':
+        # sanity: 100% task-driven z, only the latent of run (spread 0.2, and 0 = a fixed latent), returns on run only
+        X = 'tasks=run multi_task_frac=1 eval_stream_only=1 num_evals=10'
+        PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+        runs = [('m2_pre_run_sp02', PRE), ('m2_pre_run_sp0', PRE), ('m2_mq05_run_sp02', 'models/eps/e2_mq0.5_r1/fb_stage_1_run.pickle')]
+        add('m2_0', 'Sanity: F + actor on 100% run latent (pretrained spread 0.2 and 0, mu_q 0.5 run checkpoint), 500k updates', runs, extra={n: X + (' z_task_spread=0' if n.endswith('sp0') else '') for n, _ in runs})

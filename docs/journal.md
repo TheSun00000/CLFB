@@ -2,6 +2,11 @@
 
 Newest first. One entry per work session: what was done, what was learned, what comes next.
 
+## 2026-11-01 (afternoon) - sanity check of mu_b / mu_q
+- Wave 4 (ridge=0, lam 0.5 / 0.25, jobs 1807366-67) was a mistake of the user's: cancelled, removed from the queue and from git.
+- Check with the real pretrained walker FB nets on real states (float64, local GPU, user-authorized): with ridge=0 and theta_new=theta_old, R^B = 5e-16 and R^Q = 4e-26 if Sigma_old and A use the same states, but R^B = -0.10 and R^Q = 2446 with the training estimator (Sigma_old on n_big=50000 states, A on another n_est=4096 batch). The noise floor falls with n_est (R^Q: 7900 / 2100 / 1100 / 53 for 1k / 4k / 16k / 50k). The R_Q ~1100-1700 logged in the retention waves is of that size: probably mostly estimator noise. Estimator not changed yet.
+- 12 sanity runs queued (`tools/queue_sanity.py`): lam=0, ridge=0, z_task_frac=0, actor_z_task_frac=0 (uniform z), 200k updates. A: pretraining loss on, mu_b/mu_q varied; B: fb_objective=0; C: fb_objective=0 q_loss=0 ortho_coef=0 (only mu_b R^B + mu_q R^Q). New flag `q_loss` (default 1) in fb_continual_temp.py. Jobs 1807646-55 submitted, san_C2/C3 queued.
+
 ## 2026-11-01 (day) - ridge and wave 4
 Explained mu_b / mu_q (R^B on span of B, R^Q on values). Checked R^B(B_new=B_old) with the helpers on synthetic matrices: 0 only at ridge 0. Launched ret_r0_lam05 and ret_r0_lam025 (ridge=0, lam 0.5 / 0.25, af 0.5 mu_b 1000 mu_q 0.01), jobs 1807366-67. Tracker entries not added yet.
 

@@ -2,6 +2,11 @@
 
 Newest first. One entry per decision: what, why, what else was considered.
 
+## 2026-11-01: sanity runs with lam=0 before more retention sweeps
+- Decision: 12 runs with lam=0, ridge=0, uniform latents (z_task_frac=actor_z_task_frac=0), to see what mu_b and mu_q do alone when theta_new = theta_old (no returns should drop). Also fb_objective=0, and a mode where mu_b R^B + mu_q R^Q is the only loss on F and B (new flag `q_loss=0`, default unchanged).
+- Why: R^B / R^Q are not 0 at theta = theta_old with the current estimator (Sigma_old and A on different state batches: R^B -0.10, R^Q ~2400 at n_est=4096), so the earlier waves cannot separate real drift from noise. The ridge=0 decision below was used for wave 4 only, which the user cancelled; the sanity runs use ridge=0 too.
+- Not done: fixing the estimator (same batch for Sigma_old and A, or larger n_est); asked to the user.
+
 ## 2026-11-01: ridge=0 for the retention runs
 With B_new = B_old, R^B should be 0. It is only if the ridge is 0: `old_family_matrices` adds the ridge to Sigma_theta and Sigma_old but not to A, so T != I (R^B floor 0.007 at ridge 1e-5 on a random B). The user chose ridge=0. Applied by passing `ridge=0` explicitly in wave 4 (ret_r0_lam05, ret_r0_lam025, lam 0.5 / 0.25); the default in the script is NOT changed (it is recorded in info.txt and docs/experiments.md of earlier runs). Change the default only on request.
 

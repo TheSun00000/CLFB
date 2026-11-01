@@ -315,6 +315,49 @@ def rw_class(cmd):
     return 'retention', v, order, '', v, False
 
 
+def ep_is(cmd):
+    """Fast eps-only retention study (tools/queue_eps.py): models/eps/<config>_r<k>."""
+    return 'fb_continual_temp.py' in cmd and 'models/eps/' in cmd
+
+
+def ep_parts(cmd):
+    m = re.search(r'models/eps/(\S+?)_r(\d+)\b', cmd)
+    mb, mq = flag(cmd, 'mu_b', '0'), flag(cmd, 'mu_q', '0')
+    z = lambda v: float(v) == 0
+    lab = 'no retention terms' if z(mb) and z(mq) else ('mu_q %s' % mq if z(mb) else ('mu_b %s' % mb if z(mq) else 'mu_b %s, mu_q %s' % (mb, mq)))
+    return (flag(cmd, 'tasks') or '', mb, mq, lab, m.group(2) if m else '1')
+
+
+def ep_text(cmd):
+    task, mb, mq, lab, k = ep_parts(cmd)
+    return ('Eps study: fine-tune on %s, %s (repeat %s)' % (task, lab, k),
+            'Fast retention study, eps only: the pretrained walker FB model is fine-tuned on %s for 30k updates (100k labelled states, lam 100, fixed readout, minibatch 4096, B lr x3 with cosine decay, '
+            'focus 0.5, noise 0.2; est_same=1, ridge=0), mu_b=%s, mu_q=%s, with no rollouts. The reward error eps of the 8 tasks is evaluated at 0, 10k, 20k and 30k updates: '
+            'eps of %s should fall and eps of the other tasks should stay at the pretrained level.' % (task, mb, mq, task))
+
+
+EP_MQ_SMALL, EP_MQ_LARGE, EP_MB, EP_BOTH = 'mu_q alone, 0.01 to 0.5', 'mu_q alone, 1 to 10', 'mu_b alone', 'mu_b and mu_q together'
+
+
+def ep_class(cmd):
+    task, mb, mq, lab, k = ep_parts(cmd)
+    b, q = float(mb), float(mq)
+    order = b / 1e5 + q
+    if task != 'run':
+        pn = 'fine-tuning on %s' % task
+        return 'eps-study', '%s: %s' % (task, lab), order, pn, lab, False
+    panels = []
+    if b == 0 and q == 0:
+        panels = [EP_MQ_SMALL, EP_MQ_LARGE, EP_MB, EP_BOTH]
+    elif b == 0:
+        panels = [EP_MQ_SMALL if q <= 0.5 else EP_MQ_LARGE]
+    elif q == 0:
+        panels = [EP_MB]
+    elif not (b == 1000 and q == 0.01):         # a panel holds at most 5 lines; the (1000, 0.01) run stays in the table
+        panels = [EP_BOTH]
+    return 'eps-study', 'run: %s' % lab, order, '|'.join(panels), '|'.join([lab] * len(panels)), False
+
+
 def sn_is(cmd):
     """Sanity runs of mu_b / mu_q (tools/queue_sanity.py): models/ret/san*, lam=0, uniform latents."""
     return 'fb_continual_temp.py' in cmd and 'models/ret/san' in cmd
@@ -381,7 +424,9 @@ def describe(j):
     cmd, st = j['command'] or '', j['status']
     arr = j['arrayJob'] or j['jobId']
     tail = ''
-    if sn_is(cmd):
+    if ep_is(cmd):
+        title, desc = ep_text(cmd)
+    elif sn_is(cmd):
         title, desc = sn_text(cmd)
     elif rw_is(cmd):
         title, desc = rw_text(cmd)
@@ -476,6 +521,8 @@ FAMILIES = {
                      "Can the return reach the E3 level (419-438 after 1M updates; TD3 on the same reward 475-485) when F and the actor train partly on the task latent, with L_rec, L_FB and the orthonormality term all active? Walker run, 100k labels, 500k updates."),
     'lrec-vs-fit': ('L_rec vs fit_backward_to_reward', 0.5,
                     "Can L_rec, the reward term of the continual method, fit the reward in B as well as the E3 reference (fit_backward_to_reward) while L_FB and the orthonormality term stay active? Walker run, one stage."),
+    'eps-study': ('Fast retention study: reward error eps only', -2,
+                  'Fine-tune on one task for 30k updates and look at the reward error eps of all 8 tasks: eps of the trained task should fall, the eps of the other tasks should stay at the pretrained level. Which values of mu_b and mu_q do that?'),
     'sanity': ('Sanity check of mu_b and mu_q', 0.06,
                 'Do the retention terms leave a model alone when theta_new = theta_old? lam=0, uniform latents, nothing asks the model to learn run. Walker, 200k updates, 26 runs in 3 waves.'),
     'task-design': ('Reward design: tasks that are not aligned with the built-in ones', -1,
@@ -490,6 +537,7 @@ FAMILIES = {
 
 # what each family concludes and the figures that show it (a figure = one metric of one panel, with the reason to look at it)
 SETUP = {
+    'eps-study': 'Start: the pretrained walker FB model (reward error eps of run 0.351, of the 5 unaligned tasks 0.35 to 0.78). Every run fine-tunes it on ONE task for 30k updates with the best setup of the return study (100k labelled states, reward term L_rec with weight 100 and a fixed readout on minibatches of 4096, B learning rate x3 with cosine decay, the task latent in half of the latents of L_FB and of the actor) plus the retention terms mu_b (R^B, the span of B) and mu_q (R^Q, the values of the old family), with Sigma_old re-estimated on the states of the step (est_same=1) and ridge=0. No rollouts: only eps, the share of the reward energy that B cannot explain on held-out states (latent fitted on fresh labels), for the 8 tasks of the list, at 0, 10k, 20k and 30k updates. Each chart has three panels side by side: the task fine-tuned on, the tasks that share its span (for run: stand and flip), and all the others, averaged. A line is the mean of the runs of one setting (2 or 3 seeds, band = standard deviation). Goal: the left chart falls, the other two do not rise.',
     'sanity': 'Start: the pretrained walker FB model. Every run trains it on the task run for 200k updates (100k labelled states of run, 10k per evaluation) with lam=0 (no reward term), ridge=0, and uniform latents for F and the actor (z_task_frac=0, actor_z_task_frac=0), so the model begins at theta_old and nothing asks it to learn run. Groups: A = the pretraining loss (L_FB + Q loss + ortho) with mu_b and mu_q varied; B = fb_objective=0 (Q loss + ortho, L_FB off); C = fb_objective=0 q_loss=0 ortho_coef=0 (only mu_b R^B + mu_q R^Q trains F and B); actor only = freeze_fb=1; est_same=1 = Sigma_old re-estimated on the states of the step instead of on 50000 others; the rest are controls with fewer updates or a lower learning rate. Charts: the reward error of B on run along the training (lower is better; the pretrained model is at 0.33) and the orthonormality error. After training every model is evaluated zero-shot on the 8 tasks (latent from 10k labelled states, 20 episodes): tools/retention_report.py, docs/sanity_plan.md.',
     'retention': 'Start: the pretrained walker FB model. Every run fine-tunes it on the task run for 500k updates with the best setup of the return study (reward term L_rec lam 100 on 100k labelled states, focus 0.5, noise 0.2, actor focus 1.0 unless the variant says otherwise: "actor x" = share of actor updates on the run latent, the rest on uniform latents; L_FB and orthonormality on) plus the retention terms: mu_b = the loss of the span of B (the share of reward energy of the old family of rewards that B can no longer represent), mu_q = the change of the values (F^T z) of that family. With one task and no stored latents the old family is every reward in the span of the pretrained B (latents drawn uniformly on the sphere). Then each model is evaluated zero-shot on the 8 tasks of the list (latent inferred from 10k labelled states, 20 episodes) and compared with the pretrained model and with FB_run (no retention). Target: run return >= 0.9 x FB_run, the tasks the pretrained model does well (>= 300) keep >= 85% of their return, reward error of the unaligned tasks within +0.03.',
     'final-tasks': 'B-only learnability: B alone is fitted from the pretrained B on each task (fixed readout, 30k steps) and the held-out reward error is measured. TD3 upper bound: offline TD3 from scratch on the true reward of each task, 1M updates, one run. Fine-tuning: the best setup of the return study (lam 100, focus 0.5, noise 0.2, actor focus 1.0; 500k updates, 100k labelled states, no retention terms) trained on one task at a time, the return on that task evaluated during training, then every model evaluated zero-shot on all 8 tasks (latent inferred from 10k labelled states, 20 episodes). Experiments are submitted automatically from a local queue (tools/queue.py).',
@@ -502,7 +550,29 @@ SETUP = {
 }
 
 
+def ep_figures():
+    rows = [(EP_MQ_SMALL, 'run, mu_q alone (0.01 to 0.5)', 'run'), (EP_MQ_LARGE, 'run, mu_q alone (1 to 10)', 'run'), (EP_MB, 'run, mu_b alone', 'run'), (EP_BOTH, 'run, mu_b and mu_q together', 'run')]
+    rows += [('fine-tuning on %s' % t, 'fine-tuning on %s' % t, t) for t in ('supine', 'split', 'jump_any', 'flamingo_r')]
+    figs = []
+    for panel, name, task in rows:
+        if task == 'run':
+            a = ('%s: run (the task fine-tuned on)' % name, 'Does the trained task still get encoded? Lower is better; without retention terms run falls from 0.35 to 0.04 within 10k updates.')
+            b = ('%s: stand and flip (mean)' % name, 'The two tasks that share their span with run: they may fall too, they must not rise.')
+            c = ('%s: the 5 other tasks (mean)' % name, 'supine, jump_any, kick_l, split, flamingo_r: the tasks that should stay at the pretrained level (0.54 averaged), flat or lower is good.')
+        else:
+            a = ('%s: %s (trained)' % (name, task), 'Does the trained task still get encoded? Lower is better.')
+            b = ('%s: run, stand and flip (mean)' % name, 'Three tasks that share a span; they must not rise.')
+            c = ('%s: the 4 other tasks (mean)' % name, 'The tasks that should stay at the pretrained level, flat or lower is good.')
+        for plot, (t, w) in zip(('epsA', 'epsB', 'epsC'), (a, b, c)):
+            figs.append({'plot': plot, 'panel': panel, 'title': t, 'why': w})
+    return figs
+
+
 EXTRA = {
+    'eps-study': {
+        'cols': 3, 'table': 'eps',
+        'summary': 'Fine-tuning on run: eps of run falls from 0.351 to 0.036 within 10k updates, so 30k updates are more than enough. Without retention terms the eps of the other tasks rises, mostly jump_any (+0.12), supine and kick_l (+0.03). mu_b alone does not stop it until it blocks the fit (mu_b 10000: eps of run stays at 0.19). mu_q alone at 1 gives eps 0.062 on run and lowers the eps of every other task by 0.06 to 0.14 (both seeds); mu_q 10 blocks the fit (0.199). Per-run numbers: python tools/eps_report.py; plan and log in docs/eps_plan.md. Wave e2 (mu_q 0.3 to 3, and the key settings when fine-tuning on supine, split, jump_any, flamingo_r) was still running when this was written.',
+        'figures': ep_figures()},
     'retention': {
         'standalone': True,
         'summary': 'Not solved. Fine-tuning on run (FB_run) loses supine (981 -> 19), flamingo_r (813 -> 395) and split (962 -> 676). Training the actor on uniform latents half of the time (actor 0.5) restores supine (~980, also with no retention term: supine is mostly default behaviour of the policy). mu_b 300-1000 brings the reward error of all old tasks back to the pretrained level and lifts flamingo_r to ~690, but split stays at 570-680 (59-70% of 962) in every setting, and mu_q above 0.01 does not help and drops flamingo_r to ~330. The run itself is kept (394-450, FB_run 441). 12 runs, 3 waves (jobs 1802637-40, 1803564-67, 1804737-40). The mu_b and mu_q terms need to be revised: with one task and no stored latents they act on a uniform sphere of latents, which does not protect the latent of split. Per-task numbers: docs/retention_plan.md (Log), evaluations in the Experiments tab.',
@@ -622,6 +692,8 @@ def classify(j):
     """(family, variant, order, panel, series): jobs with the same family and variant are repeats of one configuration.
     On the Results tab a panel is one chart and a series is one line of it (same series name = same color across panels)."""
     cmd = j['command'] or ''
+    if ep_is(cmd):
+        return ep_class(cmd)
     if sn_is(cmd):
         return sn_class(cmd)
     if rw_is(cmd):

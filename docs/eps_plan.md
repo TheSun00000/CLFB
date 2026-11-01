@@ -26,3 +26,9 @@ Pretrained eps: stand .295 run .351 flip .335 supine .345 jump_any .417 kick_l .
 Reading: mu_q is the term that holds the others (it freezes F on the old family and F is coupled to B through L_FB); at 1 it costs ~0.026 of trained eps. mu_b does nothing useful on top.
 The drop of the others' eps below the pretrained level is unexpected (the retention terms were meant to keep them, not improve them); to understand, not to rely on.
 Next (wave e2, 3 jobs, 2 seeds): mu_q 0.3, 0.5, 2, 3 and mb100+mq1 on run; control / mq1 / mb100+mq1 when fine-tuning supine, split, jump_any, flamingo_r (report checks every other task).
+
+### 2026-11-01 - tracker (user asked to report the eps results there; earlier instruction not to push is superseded)
+Family 'eps-study' (first in the Results tab): rows of 3 charts side by side = eps of the trained task / of the tasks aligned with it (run: stand and flip; other tasks: run, stand, flip) / mean of the others, one row per setting group
+(mu_q small, mu_q large, mu_b, both; then one row per other fine-tuned task). Curves: `epsg` {A,B,C} in snapshot/curves (tools/job_results.py: eps_groups). Page changes (tracker/index.html, also brought back in line with the live version): plots epsA/epsB/epsC,
+`cols: 3` layout, compact charts, and the jobs are merged from snapshot/jobs, jobs_1, ... (the single jobs document passed the 262144 byte limit; tools/hpc_status.py writes hpc/status/jobs_<n>.json).
+61 tracking docs (children of 1810531-33 and 1812205-07), updates entry 2026-11-01-eps. Wave e2 charts fill in as the jobs finish; the family summary is to be updated with the e2 results.

@@ -97,6 +97,28 @@ def _one(folder, task):
     return out
 
 
+ALL_TASKS = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+
+
+def eps_groups(task):
+    """The three groups of tasks whose eps is averaged in the eps study (tools/eps_report.py): A = the task fine-tuned on, B = the tasks aligned with it,
+    C = all the others. Fine-tuning on run: A = run, B = stand and flip, C = the 5 other tasks. Fine-tuning on another task: A = it, B = run, stand, flip, C = the 4 remaining."""
+    if task == 'run':
+        a, b = ['run'], ['stand', 'flip']
+    else:
+        a, b = [task], [t for t in ('run', 'stand', 'flip') if t != task]
+    return a, b, [t for t in ALL_TASKS if t not in a + b]
+
+
+def _group_values(row, task):
+    """Mean fresh eps of each group at one evaluation row (None for a group with a missing task)."""
+    out = []
+    for g in eps_groups(task):
+        v = [_num(row.get(t + '_fresh_eps')) for t in g]
+        out.append(None if not g or any(x is None for x in v) else sum(v) / len(v))
+    return out
+
+
 def _thin(steps, max_points):
     if len(steps) <= max_points:
         return steps
@@ -145,6 +167,18 @@ def curve(job, max_points=150):
         if pts:
             steps = _thin(sorted(pts), max_points)
             out[key] = {'steps': steps, 'v': [round(pts[s], 5) for s in steps]}
+    if task in ALL_TASKS:       # eps of the groups of tasks (A trained task, B aligned tasks, C the others), when every task was evaluated
+        gv = {k: {} for k in 'ABC'}
+        for r in rows:
+            vals = _group_values(r, task)
+            if all(v is not None for v in vals):
+                for k, v in zip('ABC', vals):
+                    gv[k][int(float(r.get('step') or 0))] = v
+        if gv['A']:
+            out['epsg'] = {}
+            for k in 'ABC':
+                steps = _thin(sorted(gv[k]), max_points)
+                out['epsg'][k] = {'steps': steps, 'v': [round(gv[k][s], 5) for s in steps]}
     train = _read(os.path.join(LOGS, folder, 'training_log.csv'))
     for key, col, nd in (('orth', 'orth_l2', 4), ('fb', 'fb_loss', 4)):       # 0 = not computed in this run
         pts = {}
@@ -169,7 +203,14 @@ def headline(job):
     r = res[-1]
     if r['final'] is None:
         text = '%s eps %.4f at %dk steps' % (r['task'], r['fresh_eps'], r['step'] // 1000)
-        extra = ['start eps %.4f' % r['start_eps']] + (['fit eps %.4f' % r['fit_eps']] if 'fit_eps' in r else []) \
+        gl = None
+        if r['task'] in ALL_TASKS:
+            rows_ = _read(os.path.join(LOGS, job['runFolders'][-1], 'eval_log.csv'))
+            ends = [x for x in rows_ if x.get('tag') == 'end']
+            gv = _group_values(ends[-1], r['task']) if ends else [None]
+            if all(v is not None for v in gv):
+                gl = 'mean eps: aligned tasks %.3f, others %.3f' % (gv[1], gv[2])
+        extra = (['start eps %.4f' % r['start_eps']] + ([gl] if gl else [])) + (['fit eps %.4f' % r['fit_eps']] if 'fit_eps' in r else []) \
             + (['orth_l2 %.2f' % r['orth']] if 'orth' in r else [])
         return dict(r, text=text, extra=', '.join(extra))
     text = '%s return %.1f ± %.1f at %dk steps' % (r['task'], r['final'], r['std'], r['step'] // 1000)

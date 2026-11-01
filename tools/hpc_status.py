@@ -194,24 +194,34 @@ def write_curve_shards(curves):
             json.dump({'curves': sh}, f, separators=(',', ':'))
 
 
-PUSH_SNAPSHOT = os.path.join(OUT, 'snapshot_push.json')
-PAGE_RESULT_KEYS = ('text', 'extra', 'best', 'final', 'start', 'std')      # the keys of job['results'] that the tracker page reads
+PAGE_RESULT_KEYS = ('text', 'extra', 'best', 'final', 'start', 'std', 'start_eps', 'fresh_eps', 'fit_eps', 'orth')      # the keys of job['results'] that the tracker page reads
+JOB_SHARD_BYTES = 200_000
 
 
 def write_push_snapshot(now, jobs):
-    """hpc/status/snapshot_push.json = snapshot.json without the fields the tracker page never reads (exit, partition, node, an empty err, lastLine of
-    jobs that are not running, the other keys of results): a database document is limited to 262144 bytes and the full snapshot passed it (302 kB, 325 jobs)."""
-    out = {}
-    for r, j in jobs.items():
-        k = {a: b for a, b in j.items() if a not in ('exit', 'partition', 'node')}
+    """hpc/status/jobs_<n>.json = {checkedAt, jobs: {...}} of at most JOB_SHARD_BYTES each (the tracker documents snapshot/jobs (n = 0), snapshot/jobs_1, ...): the full
+    snapshot passed the 262144 byte limit of a database document. The fields the page never reads are left out (exit, partition, node, an empty err, lastLine of
+    jobs that are not running, the other keys of results)."""
+    items = []
+    for r in sorted(jobs):
+        k = {a: b for a, b in jobs[r].items() if a not in ('exit', 'partition', 'node')}
         if not k.get('err'): k.pop('err', None)
         if k.get('status') != 'running': k.pop('lastLine', None)
         if k.get('results'): k['results'] = {a: b for a, b in k['results'].items() if a in PAGE_RESULT_KEYS}
-        out[r] = k
-    with open(PUSH_SNAPSHOT, 'w') as f:
-        json.dump({'checkedAt': now, 'jobs': out}, f, separators=(',', ':'))
-    if os.path.getsize(PUSH_SNAPSHOT) > 255_000:
-        print('WARNING: %s is %d bytes: close to the 262144 byte limit of a tracker document, shard the jobs' % (PUSH_SNAPSHOT, os.path.getsize(PUSH_SNAPSHOT)))
+        items.append((r, k))
+    shards, cur = [], {}
+    for r, k in items:
+        if cur and len(json.dumps({'checkedAt': now, 'jobs': dict(cur, **{r: k})}, separators=(',', ':'))) > JOB_SHARD_BYTES:
+            shards.append(cur)
+            cur = {}
+        cur[r] = k
+    shards.append(cur)
+    for old in [f for f in os.listdir(OUT) if re.fullmatch(r'jobs_\d+\.json', f)] + ['snapshot_push.json']:
+        if os.path.exists(os.path.join(OUT, old)):
+            os.remove(os.path.join(OUT, old))
+    for i, sh in enumerate(shards):
+        with open(os.path.join(OUT, 'jobs_%d.json' % i), 'w') as f:
+            json.dump({'checkedAt': now, 'jobs': sh}, f, separators=(',', ':'))
 
 
 def digest(job):

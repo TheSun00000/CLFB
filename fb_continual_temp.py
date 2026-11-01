@@ -85,6 +85,11 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    finetune=multi          B frozen (checkpoint=any stage pickle). ONE stage of steps_per_stage updates where F (Q loss only, reward B(s')^T Sigma^-1 z,
+                            Sigma on n_big states; L_FB / ortho / L_rec / R^B / R^Q are not computed at all) and the actor (TD3) are trained on
+                            z = latent of a random task of tasks= (fresh readout with the checkpoint's B, spread z_task_spread) with prob multi_task_frac
+                            (default 0.5), otherwise uniform on the sphere. Evaluation: fresh zero-shot return and eps of all benchmark tasks
+                            (eval_each_steps chunks apart; eval_baseline=1 gives step 0). Checkpoint written to <model_dir>/fb_multi.pickle.
     reinit_critic=0         1 (finetune=critic|reward_critic only): F and the actor are re-initialised at random at the start of
                             the RL steps (after the reward fit, B is kept), instead of starting from the pretrained ones.
                             Fresh Adam states and target network. Diagnostic: warm start vs. TD3 from scratch.
@@ -269,8 +274,8 @@ if __name__ == '__main__':
 
     # ── Single-task fine-tuning ───────────────────────────────────────────────────
     FINETUNE   = str(kwargs['finetune']) if 'finetune' in kwargs else 'none'
-    assert FINETUNE in ['none', 'actor', 'critic', 'reward_critic'], \
-        "finetune= must be none, actor, critic or reward_critic"
+    assert FINETUNE in ['none', 'actor', 'critic', 'reward_critic', 'multi'], \
+        "finetune= must be none, actor, critic, reward_critic or multi"
     RFIT_STEPS = int(kwargs['rfit_steps']) if 'rfit_steps' in kwargs else 30_000
     RFIT_LR    = float(kwargs['rfit_lr']) if 'rfit_lr' in kwargs else 3e-4
     RFIT_BS    = int(kwargs['rfit_bs']) if 'rfit_bs' in kwargs else 4096
@@ -912,7 +917,8 @@ if __name__ == '__main__':
         freeze_b:            bool  = False    # diagnostic: do not update B (F and the actor are still trained)
         # --- critic loss / fine-tuning ---
         fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
-        finetune:            str   = 'none'   # none | actor | critic | reward_critic (single-task fine-tuning, see docstring)
+        finetune:            str   = 'none'   # none | actor | critic | reward_critic | multi (see docstring)
+        multi_task_frac:     float = 0.5      # finetune=multi: fraction of the z that are (noisy) latents of the tasks, the rest is uniform on the sphere
 
     class FBTrainingState(flax.struct.PyTreeNode):
         fb_params:             Any          # {'forward': ..., 'backward': ...}
@@ -1010,13 +1016,23 @@ if __name__ == '__main__':
             cfg = self.cfg
             bs, d = cfg.batch_size, cfg.z_dim
             discount = cfg.discount
-            z = jnp.broadcast_to(sd.z_cond[None, :], (bs, d))
+            if cfg.finetune == 'multi':
+                # z = noisy latent of a random task (prob multi_task_frac) or uniform on the sphere; the reward of the Q loss is B(s')^T Sigma^-1 z
+                k_a, k_b, k_c, k_d = jax.random.split(jax.random.fold_in(random_key, 21), 4)
+                t_idx  = jnp.minimum((jax.random.uniform(k_a, (bs,)) * sd.n_atoms).astype(jnp.int32), sd.n_atoms - 1)
+                z_t    = math.sqrt(d) * normalize(normalize(sd.atoms[t_idx]) + cfg.z_task_spread * normalize(jax.random.normal(k_b, (bs, d))))
+                z      = jax.lax.stop_gradient(jnp.where(jax.random.uniform(k_d, (bs, 1)) < cfg.multi_task_frac, z_t, self.sample_z(k_c, bs)))
+            else:
+                z = jnp.broadcast_to(sd.z_cond[None, :], (bs, d))
             fb_params, fb_optimizer_state = ts.fb_params, ts.fb_optimizer_state
 
-            if cfg.finetune in ('critic', 'reward_critic'):
+            if cfg.finetune in ('critic', 'reward_critic', 'multi'):
                 # Q(s, a) = F(s, a, z)^T z regressed on r(s') + discount * min_heads F_bar(s', a', z)^T z,  a' = pi(s', z) + noise
-                reward = jax.lax.stop_gradient(
-                    self.backward_net.apply({'params': ts.fb_params['backward']}, next_obs) @ sd.w_q)
+                B_next = self.backward_net.apply({'params': ts.fb_params['backward']}, next_obs)
+                if cfg.finetune == 'multi':
+                    reward = jax.lax.stop_gradient(((B_next @ sd.sigma_old_inv) * z).sum(-1))
+                else:
+                    reward = jax.lax.stop_gradient(B_next @ sd.w_q)
                 next_mu     = self.actor_net.apply({'params': ts.actor_params}, next_obs, z)
                 next_action = jax.lax.stop_gradient(
                     sample_truncated_normal(next_mu, k_next, cfg.stddev, cfg.stddev_clip))
@@ -1321,7 +1337,7 @@ if __name__ == '__main__':
                      ('lr', float), ('lr_coef', float), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
-                     ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
+                     ('multi_task_frac', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
         if _k in kwargs:
             fb_config = dataclasses.replace(fb_config, **{_k: _typ(kwargs[_k])})
     if 'target_agg' in kwargs:
@@ -1748,6 +1764,42 @@ if __name__ == '__main__':
 
     if EVAL_BASELINE:
         run_eval(train_state, 0, 0, 'baseline', [], [])
+
+    if FINETUNE == 'multi':
+        # one stage, B frozen: F (Q loss only, L_FB skipped) and the actor (TD3) trained for steps_per_stage updates on the latents of ALL the tasks
+        # (fresh readout with B of the checkpoint, multi_task_frac of the z) + uniform z. Evaluation: fresh zero-shot return of every benchmark task.
+        B_ck = train_state.fb_params['backward']
+        idx_big = replay_buffer.sample_indices(next_stage_key(), N_BIG)
+        B_big = big_backward(B_ck, replay_buffer.obs[idx_big])
+        sig_inv = jnp.linalg.inv(B_big.T @ B_big / B_big.shape[0] + RIDGE * jnp.eye(Z_DIM))
+        zs = []
+        for t_idx in TASK_IDX:
+            reward_fn, label, param = benchmarks[t_idx]
+            sel = np.random.default_rng(SEED * 1000 + t_idx).choice(replay_buffer.size, size=N_LABELED, replace=False)
+            idx_lab = replay_buffer.valid_idx[jnp.asarray(sel)]
+            r_lab = reward_fn(replay_buffer.aux[idx_lab], param)
+            lab_r = r_lab / math.sqrt(float(jnp.mean(r_lab ** 2)))
+            z_run = jnp.mean(lab_r[:, None] * backward_apply(B_ck, replay_buffer.obs[idx_lab]), axis=0)
+            zs.append(math.sqrt(Z_DIM) * normalize(z_run))
+        zero = jnp.zeros(Z_DIM)
+        stage_data = StageData(old_params=train_state.fb_params, sigma_old_inv=sig_inv, lab_obs=replay_buffer.obs[idx_lab], lab_r=lab_r,
+                               atoms=jnp.stack(zs), n_atoms=jnp.asarray(len(zs), dtype=jnp.int32),
+                               z_run=zero, z_cond=zero, w_fit=zero, w_q=zero)
+        print(f'finetune=multi: {len(zs)} task latents {TASKS}, multi_task_frac={fb_config.multi_task_frac}, spread={fb_config.z_task_spread}')
+        for chunk in tqdm(range(CHUNKS_PER_STAGE), desc='multi'):
+            start_time = time.time()
+            train_state, current_metrics = train_chunk(train_state, replay_buffer, stage_data)
+            current_metrics = jax.device_get(current_metrics)
+            step_in_stage = (chunk + 1) * SCAN_LENGTH
+            row = {'stage': 1, 'step': step_in_stage, 'time': float(time.time() - start_time)}
+            row.update({m: float(np.mean(current_metrics[m])) for m in TRAIN_METRICS})
+            train_logger.log(row)
+            is_last = (chunk + 1) == CHUNKS_PER_STAGE
+            if EVAL_EACH_STEPS > 0 and (chunk + 1) % EVAL_EACH_STEPS == 0 and not is_last:
+                run_eval(train_state, 1, step_in_stage, 'mid', [], [])
+        save_agent(train_state, f"{MODEL_SAVE_FOLDER}/fb_multi.pickle", [], [], 1)
+        run_eval(train_state, 1, STEPS_PER_STAGE, 'end', [], [])
+        sys.exit(0)
 
     for k, (task, task_idx) in enumerate(zip(TASKS, TASK_IDX), start=1):
         print(f"\n===== Stage {k}/{len(TASKS)}: task '{task}' ({len(latents)} previous task(s)) =====")

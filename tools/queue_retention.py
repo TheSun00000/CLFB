@@ -34,6 +34,12 @@ WAVES = {
         'ret_af025_mb1000_mq01':  ('actor_z_task_frac=0.25 mu_b=1000 mu_q=0.1',  'less actor focus (best split in w2) + strong value matching'),
         'ret_af025_mb1000_mq001': ('actor_z_task_frac=0.25 mu_b=1000 mu_q=0.01', 'actor 0.25 with mu_b 1000 (untested pair) as the mu_q=0.01 reference'),
     },
+    # w4 (user request 2026-11-01): ridge=0 so that T = I exactly when B_new = B_old (R^B is then exactly 0 at the start of a stage; with ridge 1e-5 it
+    # has a floor of ~0.007 on a random B), and a much smaller lam than 100 (0.5, 0.25). Rest = best w2 config (af 0.5, mu_b 1000, mu_q 0.01).
+    'w4': {
+        'ret_r0_lam05':  ('ridge=0 lam=0.5 actor_z_task_frac=0.5 mu_b=1000 mu_q=0.01',  'ridge 0 and lam 0.5 on the best w2 config'),
+        'ret_r0_lam025': ('ridge=0 lam=0.25 actor_z_task_frac=0.5 mu_b=1000 mu_q=0.01', 'ridge 0 and lam 0.25 on the best w2 config'),
+    },
 }
 
 

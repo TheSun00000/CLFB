@@ -52,3 +52,11 @@ Trained eps (control -> 0.5 / 100+0.5 / 300+0.5): stand .027 -> .044/.035/.039; 
 Largest rise of the others: control +0.013 to +0.135; with the three settings -0.051 to +0.010 (other tasks flat or lower).
 Wave e4 (confirmation, jobs 1814260-69 + 6 queued): third seed on the 8 single tasks for the control and the three settings; two 4-task streams (run > jump_any > flamingo_r > supine; flamingo_r > split > jump_any > run), one stage of 30k each,
 control and the three settings, 2 seeds: do the earlier tasks keep their eps (fresh and stored latent) while the later ones are learned? Stop after e4 unless a setting fails there.
+
+### 2026-11-01 - wave e4 streams result (jobs 1814260-67): the single-task criterion does not carry over to a stream
+Streams s1 (run > jump_any > flamingo_r > supine) and s2 (flamingo_r > split > jump_any > run), 30k updates per stage, 2 seeds; tools/eps_report.py prints the stream tables (hpc/status/eps_streams.json for the tracker).
+- Tasks learned EARLIER are not kept: s1 control run eps .042 after stage 1, .381 / .410 / .355 after stages 2-4 (pretrained .335); mu_b 100 + mu_q 0.5: .040 -> .202 -> .353; mu_b 300 + mu_q 0.5: .051 -> .342; mu_q 0.5 alone .060 -> .388 -> .288 -> .173.
+  jump_any (s1, stage 2): control .032 -> .465 after stage 3; mb100 + mq0.5 .257 -> .446. The settings keep the PRETRAINED span (what the single-task criterion measured) but not what a previous stage learned (R^B only holds the old family softly; the atoms enter nu with weight alpha 0.5).
+- The stored latents carried through the stages (tracked eps at the end) explode with mu_b: s1 run 6690 (mb100), 9327 (mb300), 11.9 (mq0.5 alone) against 0.52 for the control; s2 up to 3e10 (mb100). Suspect an ill-conditioned Sigma_old^-1 at ridge=0 in the stage-end T.
+- Wave e5 (stream s1, one job per setting, 2 seeds): ridge=1e-5 with mb100/mb300 + mq0.5 (tests the blow-up of the stored latents), mb1000 and mb3000 + mq0.5 (stronger span term), alpha=0.9 with mb100 / mb1000 + mq0.5 (more weight on the atoms in nu).
+Third seed of the single-task runs (e4_single_*) still running.

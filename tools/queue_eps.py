@@ -75,6 +75,13 @@ E5 = [('r1e5_mb100', 'ridge=1e-5 ' + mu(100, '0.5')), ('r1e5_mb300', 'ridge=1e-5
       ('a09_mb100', 'alpha=0.9 ' + mu(100, '0.5')), ('a09_mb1000', 'alpha=0.9 ' + mu(1000, '0.5'))]
 WAVES['e5'] = {'e5_%s' % n: ('stream s1 (run > jump_any > flamingo_r > supine), %s, 2 seeds' % f, [('e5_stream_s1_%s' % n, 'run,jump_any,flamingo_r,supine', f, 2)]) for n, f in E5}
 
+# e6 (after e5, first run of each setting): alpha 0.9 + mu_b 100 keeps part of what the earlier stages learned (run eps .049 -> .185 after four stages; control .042 -> .355); alpha 0.5 does not, mu_b 1000/3000 does not,
+# ridge 1e-5 does not. Refine alpha (0.9, 0.99) and mu_b (30, 100, 300) on stream s1, and check alpha 0.9 / 0.99 + mu_b 100 on stream s2. mu_q 0.5 throughout.
+E6 = [('s1', 'a099_mb100', 'alpha=0.99 ' + mu(100, '0.5')), ('s1', 'a099_mb300', 'alpha=0.99 ' + mu(300, '0.5')), ('s1', 'a09_mb30', 'alpha=0.9 ' + mu(30, '0.5')),
+      ('s1', 'a09_mb300', 'alpha=0.9 ' + mu(300, '0.5')), ('s2', 'a09_mb100', 'alpha=0.9 ' + mu(100, '0.5')), ('s2', 'a099_mb100', 'alpha=0.99 ' + mu(100, '0.5'))]
+STREAMS_E6 = {'s1': 'run,jump_any,flamingo_r,supine', 's2': 'flamingo_r,split,jump_any,run'}
+WAVES['e6'] = {'e6_%s_%s' % (sk, n): ('stream %s (%s), %s, 2 seeds' % (sk, STREAMS_E6[sk].replace(',', ' > '), f), [('e6_stream_%s_%s' % (sk, n), STREAMS_E6[sk], f, 2)]) for sk, n, f in E6}
+
 STREAMS = {'s1': 'run,jump_any,flamingo_r,supine', 's2': 'flamingo_r,split,jump_any,run'}
 
 

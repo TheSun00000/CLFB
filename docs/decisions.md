@@ -2,6 +2,11 @@
 
 Newest first. One entry per decision: what, why, what else was considered.
 
+## 2026-11-01: retention setting for the continual runs (eps study)
+- Decision (recommended, not a default in the script): alpha 0.99, mu_b 300, mu_q 0.5, with ridge=0 and est_same=1, 30k updates per stage. The script defaults are unchanged (alpha 0.5, mu_b 1, mu_q 0.01, ridge 1e-5, est_same 0).
+- Why: single task (3 seeds): mu_q 0.5 stops the rise of the other tasks' eps; streams of 4 and 8 tasks: only alpha 0.99 keeps the earlier tasks (alpha 0.5 and 0.9 do not, ridge 1e-5 does not help), mu_b 300 keeps more than 100 over 8 stages, stored latents stay valid; without mu_b the learned tasks are lost, without mu_q the tasks not yet learned stop improving. Evidence: docs/eps_plan.md, runs models/eps/*, tracker family 'eps-study'.
+- Limits: eps only (returns not checked), one dataset/environment (walker), 2 seeds per stream configuration, mu_b 1000 and longer streams untested; mu_b 300 + mu_q 0.5 failed the single-task criterion on stand in one of three seeds (+0.032).
+
 ## 2026-11-01: `est_same` flag (Sigma_old on the step's own n_est states), default off
 - Decision: add `est_same` to `fb_continual_temp.py` (default 0, so earlier runs are unchanged). With 1, Sigma_old^-1 used in T, M and the R^B denominator is re-estimated at every step on the same n_est states as Sigma_theta and A, so that R^B = R^Q = 0 exactly at theta = theta_old.
 - Why: with Sigma_old on n_big other states, R^B/R^Q have a noise floor (R^B ~0.07, R^Q ~2000 at n_est=4096) and mu_q alone pushes F off its pretrained values (sanity A2 vs A2f). Not made the default: the retention waves and docs/experiments.md were run without it; the stage-end T (n_big fresh states, Sigma_old on others) still has a ~3% mismatch.

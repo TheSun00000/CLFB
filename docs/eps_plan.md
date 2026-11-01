@@ -74,3 +74,12 @@ stored latents eps .09-.10 (no blow-up); alpha 0.99 + mu_b 300: run .061, jump_a
 flamingo_r .125, split .097, jump_any .054, run .042 (alpha 0.9: .475 / .257 / .109 / .121).
 Wave e7 running (jobs 1816377-81): 8-task stream (supine, kick_l, flamingo_r, split, jump_any, stand, run, flip) with control / alpha 0.99 + mu_b 100 + mu_q 0.5 / alpha 0.99 + mu_b 300 + mu_q 0.5; ablations on s1: alpha 0.99 + mu_b 100 without mu_q, alpha 0.99 + mu_q 0.5 without mu_b.
 Tracker (e3-e6 pushed, e7 not yet): page now has the stream summary table (one row per setting, eps right after its stage -> at the end, mean final eps of the earlier tasks, worst eps of the stored latents), full stage tables folded under it, data in snapshot/eps_streams (tools/eps_report.py writes hpc/status/eps_streams.json).
+
+### 2026-11-01 - wave e7 result (jobs 1816377-81) and end of the study
+8-task stream (supine > kick_l > flamingo_r > split > jump_any > stand > run > flip, 30k per stage, 2 seeds), eps at the end (right after the task's own stage in brackets; pretrained in the last column):
+control supine .435 (.033) kick_l .759 (.033) flamingo_r .788 (.053) split .542 (.056) jump_any .526 (.038) -> nothing kept (pretrained .346 .685 .781 .468 .417);
+alpha 0.99 + mu_b 100 + mu_q 0.5: .230 .348 .351 .259 .257; alpha 0.99 + mu_b 300 + mu_q 0.5: .129 .096 .148 .134 .089, stored latents worst eps .16 (valid).
+Ablations on s1 (alpha 0.99, 2 seeds): mu_b 100 without mu_q: run .080, jump_any .077, flamingo_r .091, supine .033, but the tasks not yet learned stop improving (+0.01 to +0.06 after stage 1 instead of -0.07); mu_q 0.5 without mu_b: run .130, jump_any .237, flamingo_r .584 (lost).
+Conclusion: mu_b holds what earlier stages learned (needs alpha 0.99; 300 > 100 over 8 stages), mu_q holds the tasks that were never trained (and fixes the single-task case). Recommended: alpha 0.99, mu_b 300, mu_q 0.5, ridge 0, est_same 1.
+Single task (3 seeds): mu_b 100 + mu_q 0.5 passes on all 8; mu_b 300 + mu_q 0.5 on 7 of 8 (stand +0.032 in the third seed).
+Not done: returns of any of these settings; mu_b 1000 / longer streams; est_same and ridge 0 are not defaults of the script (flags). Study stopped: results satisfying (stop rule). Tracker updated with everything (family 'eps-study' + stream tables + Updates entries).

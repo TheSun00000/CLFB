@@ -330,6 +330,11 @@ def ep_parts(cmd):
 
 def ep_text(cmd):
     task, mb, mq, lab, k = ep_parts(cmd)
+    if ',' in task:
+        return ('Eps study: stream %s, %s (repeat %s)' % (' > '.join(task.split(',')), lab, k),
+                'Stream of %d tasks, one stage of 30k updates each (%s), on the pretrained walker FB model, with mu_b=%s, mu_q=%s (est_same=1, ridge=0, no rollouts). '
+                'After each stage the reward error eps of the 8 tasks is evaluated (fresh readout, and the stored latent carried through the stages for the tasks already learned): '
+                'the tasks of earlier stages should keep their eps while the later ones are learned.' % (len(task.split(',')), ' > '.join(task.split(',')), mb, mq))
     return ('Eps study: fine-tune on %s, %s (repeat %s)' % (task, lab, k),
             'Fast retention study, eps only: the pretrained walker FB model is fine-tuned on %s for 30k updates (100k labelled states, lam 100, fixed readout, minibatch 4096, B lr x3 with cosine decay, '
             'focus 0.5, noise 0.2; est_same=1, ridge=0), mu_b=%s, mu_q=%s, with no rollouts. The reward error eps of the 8 tasks is evaluated at 0, 10k, 20k and 30k updates: '
@@ -343,6 +348,9 @@ def ep_class(cmd):
     task, mb, mq, lab, k = ep_parts(cmd)
     b, q = float(mb), float(mq)
     order = b / 1e5 + q
+    if ',' in task:       # a stream: shown in the stream table, not in the charts
+        sk = 's1' if task.startswith('run,') else 's2'
+        return 'eps-study', 'stream %s: %s' % (sk, lab), 1000 + order, '', '', False
     if task != 'run':
         pn = 'fine-tuning on %s' % task
         return 'eps-study', '%s: %s' % (task, lab), order, pn, lab, False
@@ -567,6 +575,8 @@ def ep_figures():
             c = ('%s: the %d other tasks (mean)' % (name, 5 if task in ('stand', 'flip') else 4), 'The tasks that should stay at the pretrained level, flat or lower is good.')
         for plot, (t, w) in zip(('epsA', 'epsB', 'epsC'), (a, b, c)):
             figs.append({'plot': plot, 'panel': panel, 'title': t, 'why': w})
+    figs.append({'type': 'streams', 'title': 'Streams of 4 tasks: do the earlier tasks keep their eps?',
+                 'why': 'Each stream trains four tasks one after the other (30k updates each); a retention setting should keep the eps of the tasks learned earlier (underlined) low and leave the others where they were.'})
     return figs
 
 

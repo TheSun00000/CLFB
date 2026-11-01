@@ -351,7 +351,7 @@ details.allruns .tablebox { margin-top: 8px; }
 <script>
 (function () {
   var ROUTES = ["overview", "experiments", "results", "updates", "next", "slides"];
-  var data = { evalTasks: null, taskCorr: null, bonly: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
+  var data = { epsStreams: null, evalTasks: null, taskCorr: null, bonly: null, jobs: [], meta: null, tracking: {}, families: {}, curves: {}, updates: [], todos: [], slides: [] };
   var loaded = { jobs: false, tracking: false, families: false, curves: false, updates: false, todos: false, slides: false };
   var db = null, canWrite = false, deckIdx = 0;
 
@@ -754,6 +754,38 @@ details.allruns .tablebox { margin-top: 8px; }
     wrap.appendChild(el("p", "chartnote", "Held-out reward error eps (0 = perfect, 1 = nothing explained). Green: eps after the fit <= 0.05, i.e. B encodes the task."));
     return wrap;
   }
+  function buildStreams() {     // eps study: streams of tasks, one stage each: eps of the 8 tasks after every stage (mean over the runs), change vs the pretrained model
+    var d = data.epsStreams; if (!d || !d.streams || !d.streams.length) return null;
+    var wrap = el("div", "alltasks");
+    d.streams.forEach(function (st) {
+      wrap.appendChild(el("h4", "chart-title", st.name + "  (" + st.runs + " runs): " + st.tasks.join(" > ")));
+      var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
+      ["After"].concat(d.all).forEach(function (h, i) { hr.appendChild(el("th", i > 0 ? "num" : null, h)); });
+      var th = el("thead"); th.appendChild(hr); t.appendChild(th);
+      var tb = el("tbody");
+      function row(label, vals, learnedUpTo, base, cls) {
+        var tr = el("tr", cls || null); tr.appendChild(el("td", null, label));
+        d.all.forEach(function (tk) {
+          var v = vals[tk], c = el("td", "num");
+          if (v == null) { tr.appendChild(c); return; }
+          c.appendChild(document.createTextNode(v.toFixed(3)));
+          if (base && base[tk] != null) {
+            var dl = v - base[tk];
+            c.appendChild(el("span", dl < -0.03 ? "up" : (dl > 0.03 ? "down" : "flat"), " " + (dl >= 0 ? "+" : "") + dl.toFixed(2)));
+          }
+          if (learnedUpTo != null && st.tasks.slice(0, learnedUpTo).indexOf(tk) >= 0) c.style.textDecoration = "underline";
+          tr.appendChild(c);
+        });
+        tb.appendChild(tr);
+      }
+      row("pretrained model", st.pre, null, null, "base");
+      st.stages.forEach(function (sg, k) { row("stage " + (k + 1) + ": " + st.tasks[k], sg, k + 1, st.pre); });
+      if (st.tracked) row("stored latents (end)", st.tracked, st.tasks.length, null);
+      t.appendChild(tb); box.appendChild(t); wrap.appendChild(box);
+    });
+    wrap.appendChild(el("p", "chartnote", "Reward error eps of every task after each stage (lower is better); underlined: the tasks learned so far in the stream. The small number is the change from the pretrained model: green = lower by more than 0.03, red = higher by more than 0.03. The last row is the eps of the latent stored for each task and carried through the stages (T)."));
+    return wrap;
+  }
   function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)
     var d = data.evalTasks; if (!d || !d.rows || !d.rows.length) return null;
     var tasks = d.tasks, base = null;
@@ -810,6 +842,14 @@ details.allruns .tablebox { margin-top: 8px; }
         lb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) lb.appendChild(el("p", "fig-why", f.why));
         var lg = legendEl(f.legend); if (lg) lb.appendChild(lg); lb.appendChild(lc);
         wrap.appendChild(lb); any = true; return;
+      }
+      if (f.type === "streams") {
+        var stt = buildStreams();
+        if (!stt) return;
+        var sb = el("div", "fig"); sb.style.gridColumn = "1 / -1";
+        sb.appendChild(el("h4", "fig-title", f.title || "")); if (f.why) sb.appendChild(el("p", "fig-why", f.why));
+        sb.appendChild(stt);
+        wrap.appendChild(sb); any = true; return;
       }
       if (f.type === "alltasks") {
         var tbl = buildAllTasks();
@@ -1003,6 +1043,7 @@ details.allruns .tablebox { margin-top: 8px; }
           if (d.id === "eval_all_tasks") data.evalTasks = d.data() || null;
           if (d.id === "task_corr") data.taskCorr = d.data() || null;
           if (d.id === "bonly") data.bonly = d.data() || null;
+          if (d.id === "eps_streams") data.epsStreams = d.data() || null;
         });
         data.curves = all;
         data.jobs = Object.keys(jobsAll).map(function (k) { return jobsAll[k]; });

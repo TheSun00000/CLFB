@@ -53,6 +53,23 @@ def print_streams(streams):
         print('%-20s ' % 'stored latents (end)' + ' '.join(cells) + '   (* = learned in the stream)')
 
 
+def stream_json(streams):
+    """hpc/status/eps_streams.json = the tracker document snapshot/eps_streams: eps of the 8 tasks after every stage of every stream configuration (mean over the repeats)."""
+    import json
+    out = []
+    for cfg in sorted(streams):
+        rs = streams[cfg]
+        n = min(len(r['ends']) for r in rs)
+        tl = rs[0]['tasks']
+        mean = lambda vals: (round(st.mean(vals), 4) if vals else None)
+        out.append({'name': cfg, 'runs': len(rs), 'tasks': tl,
+                    'pre': {t: mean([r['base'][t] for r in rs if r['base'][t] is not None]) for t in TASKS},
+                    'stages': [{t: mean([r['ends'][k][t] for r in rs if r['ends'][k][t] is not None]) for t in TASKS} for k in range(n)],
+                    'tracked': {t: mean([r['ends'][n - 1]['tracked'][t] for r in rs if r['ends'][n - 1]['tracked'].get(t) is not None]) for t in TASKS}})
+    with open('hpc/status/eps_streams.json', 'w') as f:
+        json.dump({'all': TASKS, 'streams': out}, f, separators=(',', ':'))
+
+
 def main():
     prefix = sys.argv[1] if len(sys.argv) > 1 else ''
     runs, streams = {}, {}
@@ -89,6 +106,7 @@ def main():
         sys.exit('no finished run with model_dir=models/eps/ in hpc/logs')
     if streams:
         print_streams(streams)
+        stream_json(streams)
     if not runs:
         return
     refs = {}       # trained task -> mean trained eps of its control (no retention terms)

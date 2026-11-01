@@ -58,3 +58,18 @@ if __name__ == '__main__':
             chunk = runs[i:i + 3]
             add('m3_%d' % (i // 3), 'One task at a time, 100%% of its latent, stream checkpoints: ' + ', '.join(n[3:] for n, _, _ in chunk), [(n, c) for n, c, _ in chunk],
                 extra={n: 'tasks=%s multi_task_frac=1 eval_stream_only=1 num_evals=10' % t for n, _, t in chunk})
+    if sys.argv[1] == 'm4':
+        # goal: ONE joint F + actor trained on several tasks at once that reaches the single-task returns (m3). 100% task-driven z, from the mu_b 300 stream checkpoint (seed 1) unless said.
+        E = 'models/eps/'
+        MB1, MB2 = E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle', E + 'e7_stream_s8_a099_mb300_r2/fb_stage_8_flip.pickle'
+        CT = E + 'e7_stream_s8_ctrl_r1/fb_stage_8_flip.pickle'
+        F1 = 'multi_task_frac=1'
+        J = [('m4_j8_mb300_s1', MB1, 'all 8 tasks', T8, F1, 500000), ('m4_j6_mb300_s1', MB1, '6 tasks without split and flamingo_r', 'stand,run,flip,supine,jump_any,kick_l', F1, 500000),
+             ('m4_j4_mb300_s1', MB1, '4 hard tasks run flip jump_any kick_l', 'run,flip,jump_any,kick_l', F1, 500000), ('m4_j8_mb300_s1_1M', MB1, 'all 8 tasks, 1M updates', T8, F1, 1000000),
+             ('m4_j8_mb300_s2', MB2, 'all 8 tasks, stream seed 2', T8, F1, 500000), ('m4_j8_ctrl_s1', CT, 'all 8 tasks, control stream', T8, F1, 500000)]
+        for n, ck, what, ts, ex, st in J:
+            add(n, 'Joint F + actor, 100%% task-driven z, B frozen: %s (%s, %dk updates)' % (what, ck.split('/')[-2][3:], st // 1000), [(n, ck)], steps=st, every=st // 10000,
+                extra='tasks=%s %s' % (ts, ex))
+        PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+        cm = ['python fb_continual_temp.py env_name=walker checkpoint=%s tasks=%s bench=final num_evals=20 ridge=0 eval_ckpt=%s eval_z=random model_dir=models/multi/m4_rand_%s' % (c, T8, c, n) for n, c in (('pre', PRE), ('mb300', MB1), ('ctrl', CT))]
+        subprocess.run([sys.executable, Q, 'add', 'm4_randz', '--time', '1:00:00', '--title', 'Random-latent control: return of the policy with a random z on all 8 tasks (pretrained, mu_b 300 stream, control stream)'] + sum([['--cmd', c] for c in cm], []), check=True)

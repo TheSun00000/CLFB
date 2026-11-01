@@ -2,6 +2,9 @@
 
 Newest first. One entry per decision: what, why, what else was considered.
 
+## 2026-11-01: ridge=0 for the retention runs
+With B_new = B_old, R^B should be 0. It is only if the ridge is 0: `old_family_matrices` adds the ridge to Sigma_theta and Sigma_old but not to A, so T != I (R^B floor 0.007 at ridge 1e-5 on a random B). The user chose ridge=0. Applied by passing `ridge=0` explicitly in wave 4 (ret_r0_lam05, ret_r0_lam025, lam 0.5 / 0.25); the default in the script is NOT changed (it is recorded in info.txt and docs/experiments.md of earlier runs). Change the default only on request.
+
 ## 2026-10-31: new walker tasks defined on the observation, to test retention
 - Decision: add six walker tasks to the benchmark list of `fb_continual_temp.py`: `spin_back`, `kick_r`, `lean_a`, `jump`, `knees_bent`, `split`. Their rewards are functions of the 24-d observation (angles of the 7 bodies, joint and torso velocities), carried in `aux[..., 4:28]` (dataset and rollouts). `tools/task_design.py` has the study and the definitions.
 - Reason: the five built-in tasks are all functions of the same 4 physics quantities; B fine-tuned on run encodes all of them (eps 0.29-0.38 -> 0.04-0.14, latent cosine 0.91-1.0 with run), and fitting B on one after run costs run nothing (eps_run 0.037 -> 0.035-0.06). The new tasks have reward correlation ~0 with run and, fitted after run, raise eps_run to 0.11-0.26; fitted before run, their own eps rises from 0.01-0.06 to 0.08-0.18 once run is learned (stand, walk, flip: +0.004-0.025). So they can show what mu_b and mu_q protect.
@@ -39,6 +42,3 @@ Newest first. One entry per decision: what, why, what else was considered.
 ## 2026-11-01 - Retention study (waves 1-3, 12 runs): stop, report
 Decision: stop the mu_b / mu_q / actor-fraction sweep after 3 waves without meeting the 'others' target. Keep mu_q = 0.01 (larger values hurt flamingo_r), mu_b 300-1000 and actor_z_task_frac 0.25-0.5 as the best partial setting.
 Why: B retention restores eps and the actor fix restores supine, but split stays at 59-70% of pretrained and flamingo_r at 61-85%; the loss is in F/actor for those latents. Details and numbers: docs/retention_plan.md (Log).
-
-## 2026-11-01: ridge=0 for the retention runs
-With B_new = B_old, R^B should be 0. It is only if the ridge is 0: `old_family_matrices` adds the ridge to Sigma_theta and Sigma_old but not to A, so T != I (R^B floor 0.007 at ridge 1e-5 on a random B). The user chose ridge=0. Applied by passing `ridge=0` explicitly in wave 4 (ret_r0_lam05, ret_r0_lam025, lam 0.5 / 0.25); the default in the script is NOT changed (it is recorded in info.txt and docs/experiments.md of earlier runs). Change the default only on request.

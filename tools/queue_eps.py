@@ -36,6 +36,17 @@ WAVES = {
         'e2_tb': ('other fine-tuned tasks: jump_any, flamingo_r',
                   [('e2_%s_%s' % (n, t), t, f, SEEDS) for t in ('jump_any', 'flamingo_r') for n, f in (('ctrl', mu(0, 0)), ('mq1', mu(0, 1)), ('mb100_mq1', mu(100, 1)))]),
     },
+    # e2 result: on run, mu_q 0.5-1 keeps every other task flat or lower (trained eps .055-.062 against .036), mu_q >= 2 blocks the fit (.10-.14); mb100+mq1 about the same as mq1.
+    # Other fine-tuned tasks: supine and split have little forgetting without retention terms (<= +0.016); jump_any and flamingo_r do (+0.08) and mb100+mq1 removes it (others <= -0.03,
+    # trained .047 / .065 against .030 / .043); split gets trained .095 against .057 with mq1 or mb100+mq1. e3: one setting across the 8 tasks: mq 0.5, mb100+mq0.5, mb100+mq1
+    # on all tasks, plus the controls of the tasks that have none (stand, flip, kick_l). 14 runs per job.
+    'e3': {
+        'e3_a': ('mu_q 0.5 on 7 tasks', [('e3_mq0.5_%s' % t, t, mu(0, '0.5'), SEEDS) for t in ('supine', 'split', 'jump_any', 'flamingo_r', 'stand', 'flip', 'kick_l')]),
+        'e3_b': ('mu_b 100 + mu_q 0.5 on 4 tasks, controls of stand, flip, kick_l',
+                 [('e3_mb100_mq0.5_%s' % t, t, mu(100, '0.5'), SEEDS) for t in ('run', 'supine', 'split', 'jump_any')] + [('e3_ctrl_%s' % t, t, mu(0, 0), SEEDS) for t in ('stand', 'flip', 'kick_l')]),
+        'e3_c': ('mu_b 100 + mu_q 0.5 on 4 tasks, mu_b 100 + mu_q 1 on stand, flip, kick_l',
+                 [('e3_mb100_mq0.5_%s' % t, t, mu(100, '0.5'), SEEDS) for t in ('flamingo_r', 'stand', 'flip', 'kick_l')] + [('e3_mb100_mq1_%s' % t, t, mu(100, 1), SEEDS) for t in ('stand', 'flip', 'kick_l')]),
+    },
 }
 
 
@@ -44,7 +55,7 @@ def add(job, title, items, wave):
     for cfg, task, extra, reps in items:
         for k in range(1, reps + 1):
             cmds.append('python fb_continual_temp.py env_name=walker checkpoint=$CKPT tasks=%s %s %s model_dir=models/eps/%s_r%d' % (task, BASE, extra, cfg, k))
-    args = [sys.executable, Q, 'add', job, '--time', '1:50:00', '--title', 'Eps study %s: %s (%d runs of 30k updates, one job)' % (wave, title, len(cmds))]
+    args = [sys.executable, Q, 'add', job, '--time', '1:55:00', '--title', 'Eps study %s: %s (%d runs of 30k updates, one job)' % (wave, title, len(cmds))]
     for c in cmds:
         args += ['--cmd', c]
     subprocess.run(args, check=True)

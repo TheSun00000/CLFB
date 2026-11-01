@@ -12,6 +12,7 @@ Q = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'queue.py')
 BASE = ('n_labeled=100000 num_evals=5 steps_per_stage=30000 lam=100 rec_fixed_w=1 rec_bs=4096 lr_coef=3 b_cosine=1 z_task_frac=0.5 '
         'actor_z_task_frac=0.5 z_task_spread=0.2 ztask_bs=4096 bench=final eval_each_steps=10 eval_baseline=1 eval_rollouts=0 est_same=1 ridge=0')
 SEEDS = 2
+TASKS8 = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
 
 
 def mu(mb, mq):
@@ -46,6 +47,13 @@ WAVES = {
                  [('e3_mb100_mq0.5_%s' % t, t, mu(100, '0.5'), SEEDS) for t in ('run', 'supine', 'split', 'jump_any')] + [('e3_ctrl_%s' % t, t, mu(0, 0), SEEDS) for t in ('stand', 'flip', 'kick_l')]),
         'e3_c': ('mu_b 100 + mu_q 0.5 on 4 tasks, mu_b 100 + mu_q 1 on stand, flip, kick_l',
                  [('e3_mb100_mq0.5_%s' % t, t, mu(100, '0.5'), SEEDS) for t in ('flamingo_r', 'stand', 'flip', 'kick_l')] + [('e3_mb100_mq1_%s' % t, t, mu(100, 1), SEEDS) for t in ('stand', 'flip', 'kick_l')]),
+    },
+    # e3b (launched in parallel with e3 to use free slots; at most 10 jobs at a time are fine): two more settings around the candidates, on the 8 tasks, 8 runs per job:
+    # mb100 + mq0.3 (a smaller trained-eps price than mq 0.5-1) and mb300 + mq0.5 (a stronger span term).
+    'e3b': {
+        'e3b_%s_%d' % (n, k): ('mu_b %s + mu_q %s on tasks %d-%d' % (b, q, 4 * k + 1, 4 * k + 4),
+                              [('e3b_mb%s_mq%s_%s' % (b, q, t), t, mu(b, q), SEEDS) for t in TASKS8[4 * k:4 * k + 4]])
+        for (n, b, q) in (('a', 100, '0.3'), ('b', 300, '0.5')) for k in (0, 1)
     },
 }
 

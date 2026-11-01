@@ -58,7 +58,7 @@ def main():
         tr, ev = rd(d + '/training_log.csv'), rd(d + '/eval_log.csv')
         if not tr:
             continue
-        f = lambda c: st.mean(float(r[c]) for r in tr[-10:] if r.get(c) not in (None, '', 'nan'))
+        f = lambda c: (lambda v: st.mean(v) if v else None)([float(r[c]) for r in tr[-10:] if r.get(c) not in (None, '', 'nan')])
         rets = [float(r['run_fresh_mean']) for r in ev if r.get('run_fresh_mean') not in (None, '', 'nan')]
         extra[m.group(1)] = {'R_B': f('old_rewards_lost_fraction'), 'R_Q': f('old_rewards_value_change'), 'orth': f('orth_l2'),
                              'run_last5': st.mean(rets[-5:]) if rets else None, 'steps': int(float(tr[-1]['step'])), 'n_evals': len(rets)}
@@ -80,7 +80,7 @@ def main():
             else:
                 cells.append(' ' * 13)
         e = extra.get(n, {})
-        print('%-18s ' % n + ' '.join(cells) + ' | %s %s %s' % (('%7.0f' % e['run_last5']) if e.get('run_last5') else '      -', ('%.3f' % e['R_B']) if e else '    -', ('%.3f' % e['R_Q']) if e else '    -'))
+        print('%-18s ' % n + ' '.join(cells) + ' | %s %s %s' % (('%7.0f' % e['run_last5']) if e.get('run_last5') else '      -', ('%.3f' % e['R_B']) if e and e.get('R_B') is not None else '    -', ('%.3f' % e['R_Q']) if e and e.get('R_Q') is not None else '    -'))
         ok = None
         if ref and n not in ('pretrained', 'FB_run') and 'run' in r:
             good = [t for t in TASKS if t not in ALIGNED and pre[t][0] >= 300 and t in r]

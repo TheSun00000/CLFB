@@ -55,3 +55,15 @@ Key observation: with mu_b=300 the eps of supine is 0.37 (pretrained 0.34, FB_ru
 B keeps (part of) the span, yet the returns do not come back. => the policy is what forgets: the actor is trained on z_run only (actor_z_task_frac=1.0).
 Decision rule 'eps preserved, returns drop' applies: wave 2 = actor_z_task_frac 0.5/0.25 with mu_b 300 (+ mb1000, + a control without retention terms to separate the actor effect from R^B).
 Risk: the earlier return study found actor focus 1.0 best for run return; the run target is >= 397.
+
+### 2026-11-01 02:45 - wave 2 (3 of 4 finished; af025 still running) - actor fix works for supine, NOT for split / flamingo_r
+Zero-shot return (pretrained / FB_run in brackets: supine 981/19, split 962/676, flamingo_r 813/395, run 352/441):
+- ret_af05_nor   (actor 0.5, no retention term): run 443, supine 980, split 637, flamingo_r 499, stand 938, flip 847, kick_l 165.
+- ret_af05_mb300 (R_B 0.014, R_Q 1675):          run 401, supine 984, split 574, flamingo_r 665.
+- ret_af05_mb1000 (R_B ~0, R_Q 1455):            run 401, supine 868, split 621, flamingo_r 694.
+Run target (>= 397) met by all three. 'Others' target (>= 85% of pretrained on supine/split/flamingo_r) NOT met: split 60-66%, flamingo_r 61-85%.
+eps: mb1000 brings the others back to the pretrained level (supine 0.36, split 0.47, flamingo 0.77, jump_any 0.50) but the control does not (0.47/0.56/0.82).
+Reading: (1) giving the actor uniform latents alone restores supine (980 even though eps 0.47): supine is mostly policy default behaviour (the caveat noted before), so it is a weak retention probe;
+(2) R_B restores the eps of every old task but only helps flamingo_r's return (+170-200); split stays at ~600 even with eps back to 0.47 => the policy / F values for the old latents changed:
+R_Q is still 1450-1700 (squared value error), mu_q = 0.01 is too small and mu_q=1 (at actor frac 1.0) was unstable.
+Next (wave 3, after af025 finishes): mu_q 0.1 and 0.03 on top of af05 + mb1000, since the actor is now stable on uniform latents; the earlier collapse of mq1 happened with actor frac 1.0.

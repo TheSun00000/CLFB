@@ -10,11 +10,28 @@ BASE = ('env_name=walker tasks=%s n_labeled=100000 num_evals=5 lr_coef=1 z_task_
 S8 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
 
 
-def add(job, title, ckpt, steps, every, tlimit, extra=''):
-    cmd = 'python fb_continual_temp.py checkpoint=%s %s steps_per_stage=%d eval_each_steps=%d %s model_dir=models/multi/%s' % (ckpt, BASE, steps, every, extra, job)
-    subprocess.run([sys.executable, Q, 'add', job, '--time', tlimit, '--title', title, '--cmd', cmd], check=True)
+def cmdline(job, ckpt, steps, every, extra=''):
+    return 'python fb_continual_temp.py checkpoint=%s %s steps_per_stage=%d eval_each_steps=%d %s model_dir=models/multi/%s' % (ckpt, BASE, steps, every, extra, job)
+
+
+def add(job, title, runs, tlimit='1:55:00', steps=500000, every=50):
+    # one job = several runs [(run name, checkpoint)] one after the other
+    cmds = [cmdline(n, c, steps, every) for n, c in runs]
+    args = [sys.executable, Q, 'add', job, '--time', tlimit, '--title', title]
+    for c in cmds:
+        args += ['--cmd', c]
+    subprocess.run(args, check=True)
 
 
 if __name__ == '__main__':
     if sys.argv[1] == 'smoke':
-        add('m0_smoke', 'Multi-task F + actor training, smoke test (10k updates, speed check)', S8, 10000, 5, '0:40:00')
+        add('m0_smoke', 'Multi-task F + actor training, smoke test (10k updates, speed check)', [('m0_smoke', S8)], '0:40:00', 10000, 5)
+    if sys.argv[1] == 'm1':
+        E = 'models/eps/'
+        PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+        st = lambda n, r: ('m1_s8_%s_r%d' % (n, r), E + 'e7_stream_s8_%s_r%d/fb_stage_8_flip.pickle' % ({'mb300': 'a099_mb300', 'ctrl': 'ctrl'}[n], r))
+        sing = lambda kind, t: ('m1_%s_%s' % (kind, t), E + ('e2_mq0.5_r1' if (kind, t) == ('mq05', 'run') else 'e3_%s_%s_r1' % ({'mq05': 'mq0.5', 'mb100': 'mb100_mq0.5'}[kind], t)) + '/fb_stage_1_%s.pickle' % t)
+        T = ['run', 'stand', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+        runs = [st('mb300', 1), st('mb300', 2), st('ctrl', 1), ('m1_pretrained', PRE)] + [sing(k, t) for k in ('mq05', 'mb100') for t in T]
+        for i in range(0, len(runs), 3):
+            add('m1_%d' % (i // 3), 'Multi-task F + actor, 500k updates, B frozen: ' + ', '.join(n[3:] for n, _ in runs[i:i + 3]), runs[i:i + 3])

@@ -39,3 +39,10 @@ supine 981 -> 19 (991), jump_any 104 -> 126 (396), kick_l 84 -> 184 (484), split
 FT_supine (best setup on supine): supine 991 (= upper bound) but stand 108, run 26, flip 91: the forgetting is symmetric.
 (Caveat: part of supine/split/flamingo_r at the pretrained model may be default behaviour of the policy, not the latent: only split validated by the random-latent control.)
 Wave 1 submitted at 00:45: jobs 1802637 (mb30), 1802638 (mb3), 1802639 (mb300), 1802640 (mb30 mq1); each ~60-70 min + eval. Entries final_ft_* (kick_l, split, flamingo_r, stand, flip) also running.
+
+### 2026-11-01 01:13 - wave 1 half way (step ~240k of 500k, no errors, 5.6 s/1k updates -> ~47 min + eval)
+Diagnostics (mean of the last chunks): R_B = share of old-family reward energy lost: mb3 0.265, mb30 0.247, mb300 0.104, mb30_mq1 0.520 (first chunk 0.002-0.04).
+=> mu_b = 3 and 30 barely change R_B (L_rec lam 100 dominates); only mu_b = 300 moves it (x2.5 lower), still 0.10. R_Q (squared value error) is huge (2000-2700, 5800 with mu_q 1),
+mu_q=1 destabilises the run (run return 75 at 240k, orth 1.7) -> mq1 is a dead end at this scale; mu_q 0.01 is already worth ~25 in the loss.
+Run return at 240k: mb3 434, mb30 411, mb300 426 (eps 0.03): the retention terms do not hurt the run so far.
+Wait for the final evaluation of the other tasks (expected ~01:40) before wave 2; likely wave 2: mu_b 1000 and 3000 (R_B still >0.1 at 300), mu_q 0.01 and 0.

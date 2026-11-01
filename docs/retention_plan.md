@@ -67,3 +67,8 @@ Reading: (1) giving the actor uniform latents alone restores supine (980 even th
 (2) R_B restores the eps of every old task but only helps flamingo_r's return (+170-200); split stays at ~600 even with eps back to 0.47 => the policy / F values for the old latents changed:
 R_Q is still 1450-1700 (squared value error), mu_q = 0.01 is too small and mu_q=1 (at actor frac 1.0) was unstable.
 Next (wave 3, after af025 finishes): mu_q 0.1 and 0.03 on top of af05 + mb1000, since the actor is now stable on uniform latents; the earlier collapse of mq1 happened with actor frac 1.0.
+
+### 2026-11-01 03:15 - wave 2 complete; wave 3 queued
+ret_af025_mb300 (R_B 0.056, R_Q 1643): run 394 (just below 397), supine 989, split 681 (71%), flamingo_r 584 (72%), stand 926, flip 744. Fails 'others' (and run by 3).
+Wave 2 = no success (waves without success: 2 of 3). Best so far on the old tasks: af025 for split, mb1000 for flamingo_r. Remaining gap is in the policy/F values (R_Q ~1500) -> wave 3 raises mu_q
+(0.1, 0.03 at af 0.5 + mb1000; 0.1 and 0.01 at af 0.25 + mb1000). If this wave fails, stop the sweep and report (rule: at most 3 waves).

@@ -26,6 +26,14 @@ WAVES = {
         'ret_af05_mb1000': ('actor_z_task_frac=0.5 mu_b=1000 mu_q=0.01', 'does a stronger R^B add to the actor change? (R_B still 0.1 at 300)'),
         'ret_af05_nor':    ('actor_z_task_frac=0.5 mu_b=0 mu_q=0',      'control: actor change alone, no retention term'),
     },
+    # w2 result: actor frac 0.5 restores supine (policy default behaviour); mu_b=1000 restores eps of all old tasks but split stays ~620 and flamingo_r ~690;
+    # actor frac 0.25 gives split 681 / flamingo_r 584 with run 394. R_Q still ~1500 at mu_q=0.01 => w3 raises mu_q now that the actor is trained on uniform latents.
+    'w3': {
+        'ret_af05_mb1000_mq01':   ('actor_z_task_frac=0.5 mu_b=1000 mu_q=0.1',   'value matching 10x stronger on the best w2 config (R_Q ~1500)'),
+        'ret_af05_mb1000_mq003':  ('actor_z_task_frac=0.5 mu_b=1000 mu_q=0.03',  'intermediate mu_q in case 0.1 destabilises'),
+        'ret_af025_mb1000_mq01':  ('actor_z_task_frac=0.25 mu_b=1000 mu_q=0.1',  'less actor focus (best split in w2) + strong value matching'),
+        'ret_af025_mb1000_mq001': ('actor_z_task_frac=0.25 mu_b=1000 mu_q=0.01', 'actor 0.25 with mu_b 1000 (untested pair) as the mu_q=0.01 reference'),
+    },
 }
 
 

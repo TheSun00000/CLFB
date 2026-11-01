@@ -67,3 +67,10 @@ Streams (e5, stream s1, first runs): alpha 0.9 + mu_b 100: run eps .049 -> .089 
 flamingo_r still lost after the last stage (.196 -> .574). mu_b 1000 / 3000 at alpha 0.5: run .23 after stage 3, no better; alpha 0.9 + mu_b 1000: .289 after stage 4; ridge 1e-5 (alpha 0.5): run back to .34-.35, jump_any worse (+0.36 for mb100).
 Stored latents still blow up (alpha 0.9: 150 / 1181; ridge 1e-5: 70-130; mu_b 1000-3000: 6e4-3e5; control 0.5) so ridge 0 is not the whole story.
 Wave e6 (jobs queued): stream s1 alpha 0.99 + mu_b 100, alpha 0.99 + mu_b 300, alpha 0.9 + mu_b 30, alpha 0.9 + mu_b 300; stream s2 alpha 0.9 + mu_b 100, alpha 0.99 + mu_b 100; mu_q 0.5, 2 seeds each.
+
+### 2026-11-01 - wave e6 result (streams) and tracker push
+alpha 0.99 is the key (alpha = weight of the stored task latents in nu): after four stages on s1, alpha 0.99 + mu_b 100 + mu_q 0.5: run .082, jump_any .074, flamingo_r .090, supine .037 (pretrained .340 .408 .779 .335; right after their own stage .051 .038 .060 .037),
+stored latents eps .09-.10 (no blow-up); alpha 0.99 + mu_b 300: run .061, jump_any .059, flamingo_r .187; alpha 0.9 + mu_b 300: .084 / .069 / .113; alpha 0.9 + mu_b 30: .138 / .145 / .341. Stream s2 (flamingo_r > split > jump_any > run) with alpha 0.99 + mu_b 100:
+flamingo_r .125, split .097, jump_any .054, run .042 (alpha 0.9: .475 / .257 / .109 / .121).
+Wave e7 running (jobs 1816377-81): 8-task stream (supine, kick_l, flamingo_r, split, jump_any, stand, run, flip) with control / alpha 0.99 + mu_b 100 + mu_q 0.5 / alpha 0.99 + mu_b 300 + mu_q 0.5; ablations on s1: alpha 0.99 + mu_b 100 without mu_q, alpha 0.99 + mu_q 0.5 without mu_b.
+Tracker (e3-e6 pushed, e7 not yet): page now has the stream summary table (one row per setting, eps right after its stage -> at the end, mean final eps of the earlier tasks, worst eps of the stored latents), full stage tables folded under it, data in snapshot/eps_streams (tools/eps_report.py writes hpc/status/eps_streams.json).

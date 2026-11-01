@@ -62,7 +62,7 @@ def stream_json(streams):
         n = min(len(r['ends']) for r in rs)
         tl = rs[0]['tasks']
         mean = lambda vals: (round(st.mean(vals), 4) if vals else None)
-        out.append({'name': cfg, 'runs': len(rs), 'tasks': tl,
+        out.append({'name': cfg, 'label': rs[0]['label'], 'runs': len(rs), 'tasks': tl,
                     'pre': {t: mean([r['base'][t] for r in rs if r['base'][t] is not None]) for t in TASKS},
                     'stages': [{t: mean([r['ends'][k][t] for r in rs if r['ends'][k][t] is not None]) for t in TASKS} for k in range(n)],
                     'tracked': {t: mean([r['ends'][n - 1]['tracked'][t] for r in rs if r['ends'][n - 1]['tracked'].get(t) is not None]) for t in TASKS}})
@@ -93,7 +93,13 @@ def main():
         mt = re.search(r"'tasks': (?:'([^']*)'|\[([^\]]*)\])", info)
         tl = (mt.group(1) or mt.group(2)).replace("'", '').replace(' ', '')
         if ',' in tl:      # a stream of tasks, one stage each: kept apart (see the stream table)
-            streams.setdefault(cfg, []).append({'tasks': tl.split(','), 'base': {t: fl(base[0], t + '_fresh_eps') for t in TASKS},
+            cmd = (re.search(r'command: (.*)', info) or [None, ''])[1]
+            lastflag = lambda k, dflt: (re.findall(r'(?:^|\s)%s=(\S+)' % k, cmd) or [dflt])[-1]
+            mb_, mq_ = lastflag('mu_b', '0'), lastflag('mu_q', '0')
+            lab = 'no retention terms' if float(mb_) == 0 and float(mq_) == 0 else ', '.join(
+                (['mu_b %s' % mb_] if float(mb_) else []) + (['mu_q %s' % mq_] if float(mq_) else []) + ['alpha %s' % lastflag('alpha', '0.5')]
+                + (['ridge %s' % lastflag('ridge', '0')] if lastflag('ridge', '0') not in ('0', '0.0') else []))
+            streams.setdefault(cfg, []).append({'label': lab, 'tasks': tl.split(','), 'base': {t: fl(base[0], t + '_fresh_eps') for t in TASKS},
                                                'ends': [{t: fl(r, t + '_fresh_eps') for t in TASKS} | {'tracked': {t: fl(r, t + '_tracked_eps') for t in TASKS}} for r in end]})
             continue
         task = tl

@@ -173,6 +173,10 @@ dl.legend .lt { grid-column: 1 / -1; font-size: 12px; text-transform: uppercase;
 .alltasks tr.base td { background: var(--idle-soft); }
 .figs { display: grid; gap: 26px 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); margin: 4px 0 18px; }
 .figs > * { min-width: 0; }
+.streamtab table { font-size: 13px; }
+.streamtab th { white-space: normal; text-transform: none; letter-spacing: 0; font-size: 12px; padding: 8px 10px; }
+.streamtab td { padding: 8px 10px; }
+.streamtab td:first-child { min-width: 210px; }
 .figs.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 16px; }
 .figs.three .chartwrap { min-width: 0; max-width: none; }
 .figs.three .fig-why { font-size: 13px; }
@@ -754,11 +758,12 @@ details.allruns .tablebox { margin-top: 8px; }
     wrap.appendChild(el("p", "chartnote", "Held-out reward error eps (0 = perfect, 1 = nothing explained). Green: eps after the fit <= 0.05, i.e. B encodes the task."));
     return wrap;
   }
-  function buildStreams() {     // eps study: streams of tasks, one stage each: eps of the 8 tasks after every stage (mean over the runs), change vs the pretrained model
+  function buildStreams() {     // eps study: streams of tasks, one stage each. Summary per stream (one row per setting), full tables by stage folded below.
     var d = data.epsStreams; if (!d || !d.streams || !d.streams.length) return null;
-    var wrap = el("div", "alltasks");
-    d.streams.forEach(function (st) {
-      wrap.appendChild(el("h4", "chart-title", st.name + "  (" + st.runs + " runs): " + st.tasks.join(" > ")));
+    var wrap = el("div", "alltasks"), groups = {}, order = [];
+    d.streams.forEach(function (st) { var k = st.tasks.join(" > "); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(st); });
+    function fix(v) { return v == null ? "" : (Math.abs(v) >= 100 ? v.toPrecision(2) : v.toFixed(3)); }
+    function stageTable(st) {
       var box = el("div", "tablebox"), t = el("table"), hr = el("tr");
       ["After"].concat(d.all).forEach(function (h, i) { hr.appendChild(el("th", i > 0 ? "num" : null, h)); });
       var th = el("thead"); th.appendChild(hr); t.appendChild(th);
@@ -768,7 +773,7 @@ details.allruns .tablebox { margin-top: 8px; }
         d.all.forEach(function (tk) {
           var v = vals[tk], c = el("td", "num");
           if (v == null) { tr.appendChild(c); return; }
-          c.appendChild(document.createTextNode(v.toFixed(3)));
+          c.appendChild(document.createTextNode(fix(v)));
           if (base && base[tk] != null) {
             var dl = v - base[tk];
             c.appendChild(el("span", dl < -0.03 ? "up" : (dl > 0.03 ? "down" : "flat"), " " + (dl >= 0 ? "+" : "") + dl.toFixed(2)));
@@ -781,9 +786,43 @@ details.allruns .tablebox { margin-top: 8px; }
       row("pretrained model", st.pre, null, null, "base");
       st.stages.forEach(function (sg, k) { row("stage " + (k + 1) + ": " + st.tasks[k], sg, k + 1, st.pre); });
       if (st.tracked) row("stored latents (end)", st.tracked, st.tasks.length, null);
+      t.appendChild(tb); box.appendChild(t); return box;
+    }
+    order.forEach(function (gk) {
+      var list = groups[gk], tasks = list[0].tasks, n = tasks.length;
+      list.forEach(function (st) {
+        var loss = [], k;
+        for (k = 0; k < n - 1; k++) { var own = st.stages[k] && st.stages[k][tasks[k]], end = st.stages[n - 1] && st.stages[n - 1][tasks[k]]; if (own != null && end != null) loss.push(end); }
+        st.loss = loss.length ? loss.reduce(function (a, b) { return a + b; }, 0) / loss.length : 9;
+        var worst = 0; tasks.forEach(function (tk) { var v = st.tracked && st.tracked[tk]; if (v != null && v > worst) worst = v; });
+        st.worst = worst;
+      });
+      list.sort(function (a, b) { return a.loss - b.loss; });
+      wrap.appendChild(el("h4", "chart-title", "Stream " + gk));
+      var box = el("div", "tablebox streamtab"), t = el("table"), hr = el("tr");
+      ["Setting"].concat(tasks.map(function (tk, i) { return (i + 1) + ". " + tk; })).concat(["Mean final eps of the earlier tasks", "Stored latents (worst eps)"]).forEach(function (h, i) { hr.appendChild(el("th", i > 0 ? "num" : null, h)); });
+      var th = el("thead"); th.appendChild(hr); t.appendChild(th);
+      var tb = el("tbody");
+      list.forEach(function (st) {
+        var tr = el("tr"); tr.appendChild(el("td", null, (st.label || st.name) + (st.runs > 1 ? "  (" + st.runs + " runs)" : "")));
+        tasks.forEach(function (tk, k) {
+          var own = st.stages[k] && st.stages[k][tk], end = st.stages[n - 1] && st.stages[n - 1][tk], c = el("td", "num");
+          if (own != null) {
+            c.appendChild(document.createTextNode(own.toFixed(3)));
+            if (k < n - 1 && end != null) { var dl = end - own; c.appendChild(el("span", dl < 0.05 ? "up" : (dl > 0.15 ? "down" : "flat"), " \u2192 " + end.toFixed(3))); }
+          }
+          tr.appendChild(c);
+        });
+        tr.appendChild(el("td", "num", st.loss < 9 ? st.loss.toFixed(3) : ""));
+        var cw = el("td", "num", fix(st.worst)); if (st.worst > 2) cw.className = "num down"; tr.appendChild(cw);
+        tb.appendChild(tr);
+      });
       t.appendChild(tb); box.appendChild(t); wrap.appendChild(box);
+      var det = el("details", "allruns"); det.appendChild(el("summary", null, "Every stage of this stream, setting by setting (" + list.length + " tables)"));
+      list.forEach(function (st) { det.appendChild(el("h4", "chart-title", st.label || st.name)); det.appendChild(stageTable(st)); });
+      wrap.appendChild(det);
     });
-    wrap.appendChild(el("p", "chartnote", "Reward error eps of every task after each stage (lower is better); underlined: the tasks learned so far in the stream. The small number is the change from the pretrained model: green = lower by more than 0.03, red = higher by more than 0.03. The last row is the eps of the latent stored for each task and carried through the stages (T)."));
+    wrap.appendChild(el("p", "chartnote", "Each cell: eps of the task right after its own stage, then (arrow) at the end of the stream; green: lost less than 0.05, red: lost more than 0.15 (eps rising back toward the pretrained level, 0.3 to 0.8). Mean final eps: the average, at the end of the stream, over the tasks learned before the last stage (lower is better; the settings are sorted by it). Stored latents: the largest eps of the latents stored for the tasks of the stream and carried through the stages; more than 2 means they no longer encode the reward (red). Means over the runs of one setting."));
     return wrap;
   }
   function buildAllTasks() {     // zero-shot return on every task, final checkpoint of each configuration (eval-only runs)

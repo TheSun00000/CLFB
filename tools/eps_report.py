@@ -90,7 +90,8 @@ def main():
         end = [r for r in ev if r['tag'] == 'end']
         if not base or not end:
             continue
-        tl = re.search(r"'tasks': '?([a-z_,\[\] ]+?)'?[,}]", info).group(1).strip('[] ').replace(' ', '')
+        mt = re.search(r"'tasks': (?:'([^']*)'|\[([^\]]*)\])", info)
+        tl = (mt.group(1) or mt.group(2)).replace("'", '').replace(' ', '')
         if ',' in tl:      # a stream of tasks, one stage each: kept apart (see the stream table)
             streams.setdefault(cfg, []).append({'tasks': tl.split(','), 'base': {t: fl(base[0], t + '_fresh_eps') for t in TASKS},
                                                'ends': [{t: fl(r, t + '_fresh_eps') for t in TASKS} | {'tracked': {t: fl(r, t + '_tracked_eps') for t in TASKS}} for r in end]})

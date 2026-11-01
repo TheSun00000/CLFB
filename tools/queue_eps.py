@@ -69,6 +69,12 @@ def add(job, title, items, wave):
     subprocess.run(args, check=True)
 
 
+# e5 (after the streams of e4): the single-task settings (mu_b 100/300, mu_q 0.5) do not keep a task learned earlier in a stream (run eps .04 after its stage, .35 after stage 3, as in the control)
+# and the stored latents carried through the stages blow up with mu_b (eps 1e3-1e10, vs 0.5 for the control): suspected ill-conditioned Sigma_old^-1 at ridge=0. One job per configuration, stream s1, 2 seeds.
+E5 = [('r1e5_mb100', 'ridge=1e-5 ' + mu(100, '0.5')), ('r1e5_mb300', 'ridge=1e-5 ' + mu(300, '0.5')), ('mb1000', mu(1000, '0.5')), ('mb3000', mu(3000, '0.5')),
+      ('a09_mb100', 'alpha=0.9 ' + mu(100, '0.5')), ('a09_mb1000', 'alpha=0.9 ' + mu(1000, '0.5'))]
+WAVES['e5'] = {'e5_%s' % n: ('stream s1 (run > jump_any > flamingo_r > supine), %s, 2 seeds' % f, [('e5_stream_s1_%s' % n, 'run,jump_any,flamingo_r,supine', f, 2)]) for n, f in E5}
+
 STREAMS = {'s1': 'run,jump_any,flamingo_r,supine', 's2': 'flamingo_r,split,jump_any,run'}
 
 

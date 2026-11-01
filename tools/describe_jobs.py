@@ -325,6 +325,8 @@ def ep_parts(cmd):
     mb, mq = flag(cmd, 'mu_b', '0'), flag(cmd, 'mu_q', '0')
     z = lambda v: float(v) == 0
     lab = 'no retention terms' if z(mb) and z(mq) else ('mu_q %s' % mq if z(mb) else ('mu_b %s' % mb if z(mq) else 'mu_b %s, mu_q %s' % (mb, mq)))
+    if flag(cmd, 'ridge') not in (None, '0', '0.0'): lab += ', ridge %s' % flag(cmd, 'ridge')
+    if flag(cmd, 'alpha'): lab += ', alpha %s' % flag(cmd, 'alpha')
     return (flag(cmd, 'tasks') or '', mb, mq, lab, m.group(2) if m else '1')
 
 

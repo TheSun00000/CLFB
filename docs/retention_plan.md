@@ -83,3 +83,8 @@ Conclusions: (1) mu_q does not improve split and HURTS flamingo_r (694 -> 330) -
 the loss is in F / the actor for the split latent, not in B. Best config: af05 mb1000 mq0.01 (run 401, supine 868, split 621, flamingo_r 694) or af025 mb300 (split 681). No run meets the 'others' target.
 Not tried (for the user to decide): the atoms of nu (store z of past tasks: R^B/R^Q on the actual old rewards instead of a uniform sphere), actor loss on stored old latents (replay of z_old in the actor
 at the policy-level), lowering the run focus (z_task_frac). Stopping here as the plan says; no more compute spent.
+
+### 2026-11-01 (user request) - wave 4: ridge=0, small lam
+Check (synthetic B, helpers of fb_continual.py): with B_new = B_old, R^B = -2e-13 at ridge 0, 7e-6 at 1e-8, 6.7e-3 at the default 1e-5 (A has no ridge, Sigma_old^-1 has, so T != I).
+User decision: ridge=0. Two runs on the best w2 config (af 0.5, mu_b 1000, mu_q 0.01) with ridge=0 and lam 0.5 / 0.25 (instead of 100): jobs 1807366 (ret_r0_lam05), 1807367 (ret_r0_lam025).
+Caveat: lam 100 -> 0.5 weakens the fit of the run reward by a factor 200; the run return may drop (target >= 397). Default `ridge` in the scripts is unchanged (passed explicitly).

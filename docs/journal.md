@@ -38,3 +38,6 @@ Fine-tuned FB_run loses supine (-962), flamingo_r (-418), split (-285). 12 runs 
 Open: split stays ~600 (vs 962). Ideas not tried: stored atoms of nu, replay of old latents in the actor loss. Tracker not updated by the script; see docs/retention_plan.md.
 Morning 2026-11-01: user stopped all experiments (nothing was running; the autonomous wake-up cron was deleted) and wants to revise what mu_b and mu_q do before more runs.
 Tracker: snapshot/jobs and curves pushed, 23 tracking docs + family 'retention' (summary, setup) written; the control ret_af05_nor (job 1803567.0, mu_b=mu_q=0) is not tracked (the retention classifier requires mu_b or mu_q > 0).
+
+## 2026-11-01 (day) - ridge and wave 4
+Explained mu_b / mu_q (R^B on span of B, R^Q on values). Checked R^B(B_new=B_old) with the helpers on synthetic matrices: 0 only at ridge 0. Launched ret_r0_lam05 and ret_r0_lam025 (ridge=0, lam 0.5 / 0.25, af 0.5 mu_b 1000 mu_q 0.01), jobs 1807366-67. Tracker entries not added yet.

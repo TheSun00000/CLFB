@@ -26,6 +26,16 @@ WAVES = {
         'e1_muq': ('mu_q alone', [('e1_mq%s' % v, 'run', mu(0, v), SEEDS) for v in ('0.01', '0.1', '1', '10')]),
         'e1_both': ('mu_b and mu_q together', [('e1_mb%s_mq%s' % (b, q), 'run', mu(b, q), SEEDS) for b, q in ((100, '0.1'), (1000, '0.1'), (1000, '0.01'), (1000, '1'))]),
     },
+    # e1 result (run, 30k updates): trained eps 0.036 without retention terms and the unaligned tasks rise (jump_any +0.12, supine/kick_l +0.03); mu_b alone helps
+    # little until it blocks the fit (10000: trained eps 0.19); mu_q alone at 1 gives trained eps 0.062 and LOWERS the eps of every other task by 0.06-0.14; mu_q 10 blocks the fit.
+    # e2: refine mu_q around 1 on run, and test the key settings when the fine-tuned task is not run (4 tasks x control / mu_q 1 / mu_b 100 + mu_q 1, 2 seeds).
+    'e2': {
+        'e2_run': ('refine mu_q around 1 on run', [('e2_mq%s' % v, 'run', mu(0, v), SEEDS) for v in ('0.3', '0.5', '2', '3')] + [('e2_mb100_mq1', 'run', mu(100, 1), SEEDS)]),
+        'e2_ta': ('other fine-tuned tasks: supine, split',
+                  [('e2_%s_%s' % (n, t), t, f, SEEDS) for t in ('supine', 'split') for n, f in (('ctrl', mu(0, 0)), ('mq1', mu(0, 1)), ('mb100_mq1', mu(100, 1)))]),
+        'e2_tb': ('other fine-tuned tasks: jump_any, flamingo_r',
+                  [('e2_%s_%s' % (n, t), t, f, SEEDS) for t in ('jump_any', 'flamingo_r') for n, f in (('ctrl', mu(0, 0)), ('mq1', mu(0, 1)), ('mb100_mq1', mu(100, 1)))]),
+    },
 }
 
 

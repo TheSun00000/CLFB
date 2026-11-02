@@ -235,3 +235,26 @@ if __name__ == '__main__':
         for j, runs in (('m22_a', A), ('m22_b', Bq)):
             cmds = [cmdline('sigma_' + n, c, 1000, 1, 'sigma_report=1 num_evals=1 eval_baseline=0 eval_rollouts=0') for n, c in runs]
             subprocess.run([sys.executable, Q, 'add', j, '--time', '1:30:00', '--title', 'Spectrum of Sigma: ' + ', '.join(n for n, _ in runs)] + sum([['--cmd', c] for c in cmds], []), check=True)
+    if sys.argv[1] == 'm23':
+        # F + actor phases on the checkpoints of the pipeline redone with ortho_coef=100 (tools/queue_eps.py q1). Run only after the q1 jobs have finished.
+        E = 'models/eps/'
+        S1, S2 = E + 'q1_s8_o100_r1/fb_stage_8_flip.pickle', E + 'q1_s8_o100_r2/fb_stage_8_flip.pickle'
+        one = lambda t: E + 'q1_single_o100_%s/fb_stage_1_%s.pickle' % (t, t)
+        B5 = 'z_task_spread=0 eval_stream_only=0 num_evals=5 '
+        B20 = 'z_task_spread=0 eval_stream_only=0 num_evals=20 '
+        W = 'multi_white=1 '
+        jobs = {
+            # (a) stream model learning run, 20 episodes (the m21 set)
+            'm23_a': (300000, 100, B20, [('s1_run_white_p25', S1, 'run', W + 'multi_task_frac=0.25'), ('s2_run_white_p25', S2, 'run', W + 'multi_task_frac=0.25'), ('s1_run_p1', S1, 'run', 'multi_task_frac=1')]),
+            'm23_b': (300000, 100, B20, [('s1_run_uni_p25', S1, 'run', 'multi_task_frac=0.25'), ('s1_run_white_p50', S1, 'run', W + 'multi_task_frac=0.5'), ('s2_run_p1', S2, 'run', 'multi_task_frac=1')]),
+            # (b) stream model learning each of the other tasks (m16 / m17 set), whitened p = 0.25
+            'm23_c': (300000, 30, B5, [('s1_%s_white_p25' % t, S1, t, W + 'multi_task_frac=0.25') for t in ('kick_l', 'jump_any', 'flip')]),
+            'm23_d': (300000, 30, B5, [('s1_%s_white_p25' % t, S1, t, W + 'multi_task_frac=0.25') for t in ('stand', 'supine', 'split', 'flamingo_r')]),
+            # (c) single-task B (run) now that Sigma is healthy: does the uniform draw work without whitening? (the m10 / m13 set)
+            'm23_e': (300000, 30, B5, [('single_run_p1', one('run'), 'run', 'multi_task_frac=1'), ('single_run_uni_p50', one('run'), 'run', 'multi_task_frac=0.5'), ('single_run_white_p50', one('run'), 'run', W + 'multi_task_frac=0.5')]),
+            'm23_f': (300000, 30, B5, [('single_run_uni_p25', one('run'), 'run', 'multi_task_frac=0.25'), ('single_kick_uni_p50', one('kick_l'), 'kick_l', 'multi_task_frac=0.5'), ('single_kick_white_p50', one('kick_l'), 'kick_l', W + 'multi_task_frac=0.5')]),
+            # (d) joint training on the 8 task latents from the new stream model (upper bound, as in m5_sp0): spread 0, 100% task latents; hard tasks x3
+            'm23_g': (500000, 50, B5.replace('eval_stream_only=0', 'eval_stream_only=0'), [('s1_joint8', S1, T8, 'multi_task_frac=1'), ('s1_joint8_hardw', S1, T8, 'multi_task_frac=1 multi_task_w=1,3,3,1,3,3,1,1')])}
+        for j, (st, ev, base, runs) in jobs.items():
+            add(j, 'Pipeline with ortho_coef 100, F + actor: ' + ', '.join(n for n, *_ in runs), [('q_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
+                extra={'q_' + n: base + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})

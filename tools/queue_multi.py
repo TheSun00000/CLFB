@@ -174,3 +174,15 @@ if __name__ == '__main__':
         B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 tasks=run '
         runs = [('s8_white_p50', S8, 'multi_task_frac=0.5'), ('s8_white_p25', S8, 'multi_task_frac=0.25'), ('mb100_white_p50', MB100, 'multi_task_frac=0.5')]
         add('m15_a', 'Retention test, whitened random latents, other starting models: ' + ', '.join(n for n, *_ in runs), [('m15_' + n, c) for n, c, _ in runs], steps=300000, every=30, extra={'m15_' + n: B + x for n, c, x in runs})
+    if sys.argv[1] == 'm16':
+        # best so far: 8-task stream model + whitened random latents, p = 0.25 (run 435, others kept except jump_any). Repeats, smaller p, 1M, and the same for kick_l / flip / jump_any
+        E = 'models/eps/'
+        S8 = E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        S8b = E + 'e7_stream_s8_a099_mb300_r2/fb_stage_8_flip.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 '
+        jobs = {'m16_a': (300000, 30, [('s8_p25_rep', S8, 'run', 'multi_task_frac=0.25'), ('s8_p10', S8, 'run', 'multi_task_frac=0.1'), ('s8b_p25', S8b, 'run', 'multi_task_frac=0.25')]),
+                'm16_b': (300000, 30, [('s8_kick_p25', S8, 'kick_l', 'multi_task_frac=0.25'), ('s8_jump_p25', S8, 'jump_any', 'multi_task_frac=0.25'), ('s8_flip_p25', S8, 'flip', 'multi_task_frac=0.25')]),
+                'm16_c': (1000000, 100, [('s8_p25_1M', S8, 'run', 'multi_task_frac=0.25'), ('s8_p50_1M', S8, 'run', 'multi_task_frac=0.5')])}
+        for j, (st, ev, runs) in jobs.items():
+            add(j, 'Retention test, 8-task stream model, whitened random latents: ' + ', '.join(n for n, *_ in runs), [('m16_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
+                extra={'m16_' + n: B + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})

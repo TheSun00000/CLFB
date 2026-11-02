@@ -21,4 +21,24 @@ Fine-tune B on ONE task (with mu_b / mu_q), then train F and the actor on that t
 - m10/m11 (run latent with prob p, uniform sphere otherwise): p = 0.9, 0.5, 0.25, 0.1: supine 24-89, split 498-647, flamingo_r 253-363 at the end: mixing uniform latents does not help. kick_l with p = 0.5 diverged (Q ~ 1500, q_loss 1e5).
   Lower lr (3e-5) the same. Longer (1M) at p = 0.5: supine 270, split 574 (slightly better).
 - Rejected ideas: kd_actor / kd_q (anchoring pi and Q to the starting model on generic latents assume that z keeps its meaning while B changes, and kd_q is mu_q); they were queued once (m10_1) and cancelled before running.
-- Hypothesis: the reward B(s')^T Sigma^-1 z of a uniform random z has far more energy than a task reward (Sigma^-1 amplifies low-variance directions), so the random-latent part of the loss is noise. Tests queued: random latents drawn as in the pretraining (B(s) of random states, `multi_bmix`, m12) and isotropic in the whitened B space (`multi_white`, m13).
+- Hypothesis: the reward B(s')^T Sigma^-1 z of a uniform random z has far more energy than a task reward (Sigma^-1 amplifies low-variance directions), so the random-latent part of the loss is noise.
+  Spectrum of Sigma (`sigma_report=1`, job 1838255): pretrained B and 8-task stream B are well conditioned (smallest eigenvalue 0.055, trace Sigma^-1 81-84; reward energy of a uniform latent 81-85 vs 50 whitened vs 25-55 for task latents);
+  the B fine-tuned on run only (mu_b 300 + mu_q 0.5) is not (smallest eigenvalue 0.00035, trace Sigma^-1 3399; uniform-latent energy 3394, q90 8272 vs 51 whitened vs 21-27 for tasks). So the energy explanation holds for the single-task B starts only.
+
+## Part C: results of the random-latent variants (retention test, B frozen, 300k updates unless said, 5 episodes, mean of the last 3 evaluations; start = B(run) mu_b 300 unless said)
+- m12 (random latents = B(s) of random states, `multi_bmix`): p = 0.5, bmix 0.5: supine kept (989) but split 617, flamingo_r 300; p = 0.9: supine 913, split 616; bmix 1: supine 671.
+- m13 (random latents whitened, `multi_white=1`): p = 0.5: run 333->438, supine 946->994, stand 388->945, flip 673->830, but split 990->657, flamingo_r 746->332, jump_any 160->124. p = 0.9: run 402, flip 917, supine 966, split 714.
+  Whitened + B(s) mix: run 435, supine 981, split 714, flamingo_r 274.
+- m14: whitened p = 0.25: run 445, supine 957, split 512, flamingo_r 521; p = 0.1: run 371, split 628; repeat of p = 0.5: run 425, supine 994, split 564, flamingo_r 303 (so differences < 50 are noise);
+  1M updates: p = 0.5 run 439, split 536; p = 0.25 run 422, split 681, flamingo_r 832. From the kick_l B (p = 0.5 / 0.25): kick_l 39->258 / 79->189, supine kept, split 887->595 / 973->399. From the pretrained model, p = 0.5: run 330->364, supine 988->983, split 955->646.
+- m15/m16/m17/m18 (START = 8-task stream model, whitened random latents, learning ONE task): the stream model is much more robust than the single-task B starts.
+  learning run, p = 0.25: run 286->435 (m15), 400 (repeat), 424 (stream seed 2), 440 (batch 4096), 415 (1M); p = 0.5: 432; p = 0.1: 427 (388 mean of last 3). supine, split, flamingo_r, stand kept (supine 974->991, split 993->993, flamingo_r 976->975, stand 870->962), flip rises (707->829); jump_any drops 212->138 at every p.
+  learning kick_l, p = 0.25: kick_l 168->333 (bound 484), all others kept (jump_any 217->249). learning jump_any: 207->304, flip drops 703->627. learning flip: 731->795, others kept. learning stand: 878->904, jump_any 210->131.
+  learning supine: kick_l 69->106, flip 586->666. learning split: split 989->997 but flip 683->503, stand 861->783, kick_l 120->38. learning flamingo_r: run 282->271, flip 683->649, jump_any 210->158.
+- m19 (stream model, uniform / B(s) random latents instead of whitened, learning run): uniform p = 0.25: run 372, others kept; uniform p = 0.5: run 401; bmix 0.5 p = 0.25: run 352. So from a well-conditioned B the whitening is not what keeps the other tasks; random latents at p <= 0.5 are.
+- Still open: jump_any (and some pairs: flip after split / jump_any) drops when another task is learned.
+
+## Running / queued when the laptop was shut down (2026-11-02, night)
+- m20_a (1840703), m20_b (1840704): random latents that look like tasks (`multi_randtask`: E[r B] for smooth threshold rewards on one observation coordinate, random sign and quantile; prior-based, flagged as such), stream model learning run (3 variants) and kick_l / split / jump_any.
+- m21_a (1840712), m21_b (1840713): the main candidate (stream model, whitened p = 0.25, learning run) 3 times with 20 episodes per task, and run-only baseline (p = 1), uniform p = 0.25, whitened p = 0.5, also 20 episodes.
+- To read: `ssh jz` then `python3 tools/multi_report.py m20_` / `m21_` in the repo (git pull first).

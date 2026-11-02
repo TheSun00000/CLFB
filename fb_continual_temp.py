@@ -86,6 +86,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
     multi_randtask=0        finetune=multi: fraction of the random latents drawn as E[r B] of random threshold rewards on one observation coordinate (task-like random rewards)
+    multi_freeze_f=0        finetune=multi: 1 = F is not updated either (B and F frozen, only the actor trains; the Q used by the actor is the starting F with the new latents)
     multi_white=0           finetune=multi: 1 = the uniform random latents become sqrt(d) normalize(Sigma^1/2 g) (isotropic random rewards in the whitened B space)
     multi_bmix=0            finetune=multi: fraction of the non-task latents drawn as B(s) of random states (pretraining distribution) instead of uniform on the sphere
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
@@ -943,6 +944,7 @@ if __name__ == '__main__':
         fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
         finetune:            str   = 'none'   # none | actor | critic | reward_critic | multi (see docstring)
         multi_randtask:      float = 0.0      # finetune=multi: fraction of the random latents that are latents E[r B] of random threshold rewards (one observation coordinate, random sign / quantile) on the batch
+        multi_freeze_f:      bool  = False    # finetune=multi: do not update F (only the actor trains)
         multi_white:         bool  = False    # finetune=multi: the uniform random latents are sqrt(d) normalize(Sigma^1/2 g): isotropic random linear rewards in the whitened B space (energy of the reward does not blow up in low-variance directions)
         multi_bmix:          float = 0.0      # finetune=multi: fraction of the NON-task latents that are B(s) of random states (the pretraining distribution) instead of uniform on the sphere
         kd_actor:            float = 0.0      # finetune=multi: weight of ||pi(s,z) - pi_start(s,z)||^2 on generic latents (sphere / B(s))
@@ -1125,6 +1127,8 @@ if __name__ == '__main__':
                     {'forward': f_grads, 'backward': zeros_b}, ts.fb_optimizer_state, ts.fb_params)
                 fb_params = {'forward':  optax.apply_updates(ts.fb_params['forward'], fb_updates['forward']),
                              'backward': ts.fb_params['backward']}
+                if cfg.multi_freeze_f and cfg.finetune == 'multi':      # actor only: F (and its Adam state) stay at the starting values
+                    fb_params, fb_optimizer_state = ts.fb_params, ts.fb_optimizer_state
                 metrics.update({'q_loss': q_loss, 'next_Q': next_Q.mean(), 'q_reward': reward.mean(),
                                 'total_loss': q_loss})
 
@@ -1423,6 +1427,8 @@ if __name__ == '__main__':
         fb_config = dataclasses.replace(fb_config, freeze_b=bool(int(kwargs['freeze_b'])))
     if 'freeze_fb' in kwargs:
         fb_config = dataclasses.replace(fb_config, freeze_fb=bool(int(kwargs['freeze_fb'])))
+    if 'multi_freeze_f' in kwargs:
+        fb_config = dataclasses.replace(fb_config, multi_freeze_f=bool(int(kwargs['multi_freeze_f'])))
     if 'multi_white' in kwargs:
         fb_config = dataclasses.replace(fb_config, multi_white=bool(int(kwargs['multi_white'])))
     if 'cross_fit' in kwargs:

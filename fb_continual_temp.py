@@ -85,6 +85,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    multi_bmix=0            finetune=multi: fraction of the non-task latents drawn as B(s) of random states (pretraining distribution) instead of uniform on the sphere
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
                             (uniform sphere, mix_ratio of them B(s) of shuffled states; no knowledge of any other task): retention of F and the actor
     multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
@@ -939,6 +940,7 @@ if __name__ == '__main__':
         # --- critic loss / fine-tuning ---
         fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
         finetune:            str   = 'none'   # none | actor | critic | reward_critic | multi (see docstring)
+        multi_bmix:          float = 0.0      # finetune=multi: fraction of the NON-task latents that are B(s) of random states (the pretraining distribution) instead of uniform on the sphere
         kd_actor:            float = 0.0      # finetune=multi: weight of ||pi(s,z) - pi_start(s,z)||^2 on generic latents (sphere / B(s))
         kd_q:                float = 0.0      # finetune=multi: weight of the match of Q(s,a,z) = F(s,a,z)^T z to the starting F on generic latents
         multi_task_frac:     float = 0.5      # finetune=multi: fraction of the z that are (noisy) latents of the tasks, the rest is uniform on the sphere
@@ -1048,7 +1050,12 @@ if __name__ == '__main__':
                 w_t    = jnp.where(w_t.sum() > 0, w_t, jnp.ones_like(w_t))
                 t_idx  = jax.random.categorical(k_a, jnp.log(w_t + 1e-9), shape=(bs,))
                 z_t    = math.sqrt(d) * normalize(normalize(sd.atoms[t_idx]) + cfg.z_task_spread * normalize(jax.random.normal(k_b, (bs, d))))
-                z      = jax.lax.stop_gradient(jnp.where(jax.random.uniform(k_d, (bs, 1)) < cfg.multi_task_frac, z_t, self.sample_z(k_c, bs)))
+                z_r    = self.sample_z(k_c, bs)
+                if cfg.multi_bmix > 0:      # pretraining latent distribution: a fraction of the random latents is B(s) of shuffled states
+                    k_e, k_f = jax.random.split(jax.random.fold_in(random_key, 23))
+                    B_r = jax.lax.stop_gradient(self.backward_net.apply({'params': ts.fb_params['backward']}, obs[jax.random.permutation(k_e, bs)]))
+                    z_r = jnp.where(jax.random.uniform(k_f, (bs, 1)) < cfg.multi_bmix, B_r, z_r)
+                z      = jax.lax.stop_gradient(jnp.where(jax.random.uniform(k_d, (bs, 1)) < cfg.multi_task_frac, z_t, z_r))
             else:
                 z = jnp.broadcast_to(sd.z_cond[None, :], (bs, d))
             fb_params, fb_optimizer_state = ts.fb_params, ts.fb_optimizer_state
@@ -1385,7 +1392,7 @@ if __name__ == '__main__':
                      ('lr', float), ('lr_coef', float), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
-                     ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
+                     ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('multi_bmix', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
         if _k in kwargs:
             fb_config = dataclasses.replace(fb_config, **{_k: _typ(kwargs[_k])})
     if 'target_agg' in kwargs:

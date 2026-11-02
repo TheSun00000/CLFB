@@ -141,3 +141,9 @@ if __name__ == '__main__':
         for j, (st, ev, runs) in jobs.items():
             add(j, 'Retention test (generic latents), ' + ', '.join(n for n, *_ in runs), [('m11_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
                 extra={'m11_' + n: B + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})
+    if sys.argv[1] == 'm12':
+        # random latents drawn as in the pretraining (half B(s) of random states): multi_bmix=0.5, and all B(s): multi_bmix=1
+        RUN = 'models/eps/e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=run '
+        V = [('bmix5_p50', 'multi_task_frac=0.5 multi_bmix=0.5'), ('bmix5_p90', 'multi_task_frac=0.9 multi_bmix=0.5'), ('bmix10_p50', 'multi_task_frac=0.5 multi_bmix=1')]
+        add('m12_a', 'Retention test, latents as in the pretraining: ' + ', '.join(n for n, _ in V), [('m12_' + n, RUN) for n, _ in V], steps=300000, every=30, extra={'m12_' + n: B + x for n, x in V})

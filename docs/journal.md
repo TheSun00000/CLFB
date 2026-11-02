@@ -52,3 +52,7 @@ Fine-tuned FB_run loses supine (-962), flamingo_r (-418), split (-285). 12 runs 
 Open: split stays ~600 (vs 962). Ideas not tried: stored atoms of nu, replay of old latents in the actor loss. Tracker not updated by the script; see docs/retention_plan.md.
 Morning 2026-11-01: user stopped all experiments (nothing was running; the autonomous wake-up cron was deleted) and wants to revise what mu_b and mu_q do before more runs.
 Tracker: snapshot/jobs and curves pushed, 23 tracking docs + family 'retention' (summary, setup) written; the control ret_af05_nor (job 1803567.0, mu_b=mu_q=0) is not tracked (the retention classifier requires mu_b or mu_q > 0).
+
+## 2026-11-02 (night): F and actor on a frozen B
+- Added `finetune=multi` (fb_continual_temp.py): B frozen, F with the Q loss, actor with TD3, latents = tasks of tasks= (prob multi_task_frac) + random ones; flags multi_task_w, multi_bmix, multi_white, batch_size (kd_actor / kd_q exist but were rejected, see docs/joint_plan.md). Cheetah work (3 new tasks in the code) was stopped by the user; four cheetah TD3 jobs cancelled at the user's request.
+- Joint training on the 8 latents works (close to the TD3 upper bounds), but it is not a retention test; the retention test (F and actor trained on one task, others only evaluated) shows that the other tasks are erased (supine 989->24). Waves m1-m13, details and numbers in docs/joint_plan.md. Tracker: Updates entry 2026-11-02-joint-fa.

@@ -255,6 +255,8 @@ if __name__ == '__main__':
             'm23_f': (300000, 30, B5, [('single_run_uni_p25', one('run'), 'run', 'multi_task_frac=0.25'), ('single_kick_uni_p50', one('kick_l'), 'kick_l', 'multi_task_frac=0.5'), ('single_kick_white_p50', one('kick_l'), 'kick_l', W + 'multi_task_frac=0.5')]),
             # (d) joint training on the 8 task latents from the new stream model (upper bound, as in m5_sp0): spread 0, 100% task latents; hard tasks x3
             'm23_g': (500000, 50, B5.replace('eval_stream_only=0', 'eval_stream_only=0'), [('s1_joint8', S1, T8, 'multi_task_frac=1'), ('s1_joint8_hardw', S1, T8, 'multi_task_frac=1 multi_task_w=1,3,3,1,3,3,1,1')])}
+        only = sys.argv[2].split(',') if len(sys.argv) > 2 else None      # e.g. m23_c,m23_d: only these jobs
         for j, (st, ev, base, runs) in jobs.items():
+            if only and j not in only: continue
             add(j, 'Pipeline with ortho_coef 100, F + actor: ' + ', '.join(n for n, *_ in runs), [('q_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
                 extra={'q_' + n: base + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})

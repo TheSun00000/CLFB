@@ -100,3 +100,15 @@ if __name__ == '__main__':
                 'm7_b': [('m7_hardw2', MB1, B + 'z_task_spread=0 multi_task_w=1,2,2,1,2,2,1,1'), ('m7_hardw5', MB1, B + 'z_task_spread=0 multi_task_w=1,5,5,1,5,5,1,1'), ('m7_bs2048', MB1, B + 'z_task_spread=0 batch_size=2048')]}
         for j, runs in jobs.items():
             add(j, 'Joint F + actor, 8 tasks, 100%% task-driven: ' + ', '.join(n[3:] for n, _, _ in runs), [(n, c) for n, c, _ in runs], extra={n: x for n, _, x in runs})
+    if sys.argv[1] == 'm8':
+        # THE retention test (user, 2026-11-02): B fine-tuned on a task with the retention terms, then F and the actor trained on that task's latent ONLY (100%, spread 0),
+        # and ALL 8 tasks evaluated (step 0 = before, then every 50k updates). Does the return on the other tasks drop?
+        E = 'models/eps/'
+        PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+        MB1 = E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        X = 'multi_task_frac=1 z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=%s'
+        jobs = {'m8_a': [('m8_pre_run', PRE, 'run'), ('m8_mb300_run', E + 'e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle', 'run'), ('m8_mb100_run', E + 'e3_mb100_mq0.5_run_r1/fb_stage_1_run.pickle', 'run')],
+                'm8_b': [('m8_mb300_kick_l', E + 'e3b_mb300_mq0.5_kick_l_r1/fb_stage_1_kick_l.pickle', 'kick_l'), ('m8_s8_run', MB1, 'run'), ('m8_s8_kick_l', MB1, 'kick_l')]}
+        for j, runs in jobs.items():
+            add(j, 'Retention test: F + actor on ONE task (100%%), all 8 tasks evaluated: ' + ', '.join(n[3:] for n, _, _ in runs), [(n, c) for n, c, _ in runs],
+                extra={n: X % t for n, _, t in runs})

@@ -166,3 +166,11 @@ if __name__ == '__main__':
         for j, (st, ev, runs) in jobs.items():
             add(j, 'Retention test, whitened random latents: ' + ', '.join(n for n, *_ in runs), [('m14_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
                 extra={'m14_' + n: B + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})
+    if sys.argv[1] == 'm15':
+        # other starting models with whitened random latents: the 8-task stream model learning run, and B(run) fine-tuned with mu_b 100
+        E = 'models/eps/'
+        S8 = E + 'e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        MB100 = E + 'e3_mb100_mq0.5_run_r1/fb_stage_1_run.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 tasks=run '
+        runs = [('s8_white_p50', S8, 'multi_task_frac=0.5'), ('s8_white_p25', S8, 'multi_task_frac=0.25'), ('mb100_white_p50', MB100, 'multi_task_frac=0.5')]
+        add('m15_a', 'Retention test, whitened random latents, other starting models: ' + ', '.join(n for n, *_ in runs), [('m15_' + n, c) for n, c, _ in runs], steps=300000, every=30, extra={'m15_' + n: B + x for n, c, x in runs})

@@ -144,6 +144,21 @@ def o3():
         subprocess.run([sys.executable, Q, 'add', j, '--time', '1:00:00', '--title', 'Orthonormality of the single-task B stage (run): is it mu_q through L_FB? ' + ', '.join(n for n, _ in runs)] + sum([['--cmd', c] for c in cmds], []), check=True)
 
 
+def q1():
+    """Pipeline redone with ortho_coef=100 (user, 2026-11-02) after the orthonormality fix (o1/o2: ortho_coef >= 30 keeps Sigma well conditioned): B stage of the 8-task stream
+    (alpha 0.99, mu_b 300, mu_q 0.5, ridge 0, est_same 1; 2 seeds) and of the 8 single-task checkpoints (mu_b 300, mu_q 0.5). eps only (30k updates per stage); sigma_log.csv has the spectrum at the end of every stage.
+    The F + actor phases (tools/queue_multi.py) follow on these checkpoints."""
+    CK = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+    S8 = 'supine,kick_l,flamingo_r,split,jump_any,stand,run,flip'
+    base = 'python fb_continual_temp.py env_name=walker checkpoint=%s' % CK
+    cmd_s = lambda r: '%s tasks=%s %s ortho_coef=100 alpha=0.99 mu_b=300 mu_q=0.5 model_dir=models/eps/q1_s8_o100_r%d' % (base, S8, BASE, r)
+    for r in (1, 2):
+        subprocess.run([sys.executable, Q, 'add', 'q1_stream_r%d' % r, '--time', '1:55:00', '--title', 'Pipeline with ortho_coef 100: 8-task stream (alpha 0.99, mu_b 300, mu_q 0.5), seed %d, eps only' % r, '--cmd', cmd_s(r)], check=True)
+    B0 = BASE.replace('eval_each_steps=10 ', 'eval_each_steps=0 ')
+    cmds = ['%s tasks=%s %s ortho_coef=100 mu_b=300 mu_q=0.5 model_dir=models/eps/q1_single_o100_%s' % (base, t, B0, t) for t in TASKS8]
+    subprocess.run([sys.executable, Q, 'add', 'q1_single', '--time', '1:55:00', '--title', 'Pipeline with ortho_coef 100: single-task B for the 8 tasks (mu_b 300, mu_q 0.5), eps only'] + sum([['--cmd', c] for c in cmds], []), check=True)
+
+
 def main():
     wave = sys.argv[1]
     if wave == 'o1':
@@ -152,6 +167,8 @@ def main():
         return o2()
     if wave == 'o3':
         return o3()
+    if wave == 'q1':
+        return q1()
     if wave == 'e4':
         WAVES['e4'] = e4_wave([tuple(x.split(',')) for x in sys.argv[2].split(';')])      # e.g. "100,0.5;300,0.5"
     for job, (title, items) in WAVES[wave].items():

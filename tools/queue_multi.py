@@ -116,3 +116,14 @@ if __name__ == '__main__':
         E = 'models/eps/'
         add('m9_smoke', 'Smoke test of kd_actor / kd_q on generic latents (finetune=multi, run learned, 2000 updates, no rollouts)', [('m9_smoke', E + 'e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle')], '0:25:00', 2000, 1,
             extra='multi_task_frac=1 z_task_spread=0 eval_stream_only=0 eval_rollouts=0 num_evals=2 tasks=run kd_actor=1 kd_q=1')
+    if sys.argv[1] == 'm10':
+        # retention test with methods that use ONLY the run labels + generic latents (sphere / B(s)); all 8 tasks evaluated (test), 300k updates, evals every 30k.
+        # start = B fine-tuned on run with mu_b 300 + mu_q 0.5 (e3b_mb300_mq0.5_run_r1). Baseline (100% run latent) = m8.
+        CK = 'models/eps/e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle'
+        B = 'tasks=run z_task_spread=0 eval_stream_only=0 num_evals=5 '
+        V = [('mix50', 'multi_task_frac=0.5'), ('mix90', 'multi_task_frac=0.9'), ('mix25', 'multi_task_frac=0.25'),
+             ('kdA1', 'multi_task_frac=1 kd_actor=1'), ('kdQ1', 'multi_task_frac=1 kd_q=1'), ('kdAQ1', 'multi_task_frac=1 kd_actor=1 kd_q=1'),
+             ('kdAQ10', 'multi_task_frac=1 kd_actor=10 kd_q=10'), ('lr3e5', 'multi_task_frac=1 lr=3e-5'), ('mix50_kdAQ1', 'multi_task_frac=0.5 kd_actor=1 kd_q=1')]
+        for i in range(0, len(V), 3):
+            runs = [('m10_' + n, CK) for n, _ in V[i:i + 3]]
+            add('m10_%d' % (i // 3), 'Retention test, generic latents only: ' + ', '.join(n for n, _ in V[i:i + 3]), runs, steps=300000, every=30, extra={'m10_' + n: B + x for n, x in V[i:i + 3]})

@@ -119,10 +119,25 @@ def o1():
     subprocess.run([sys.executable, Q, 'add', 'o1_orth', '--time', '1:55:00', '--title', 'Orthonormality of the single-task B stage (run, mu_b 300 + mu_q 0.5): ortho_coef, lam, lr_coef (10 runs of 30k updates, eps only)'] + sum([['--cmd', c] for c in cmds], []), check=True)
 
 
+def o2():
+    """Parallel companions of o1 (one job per group, 4 runs each): combinations, which retention term causes the collapse, smaller lam, other optimiser / estimator settings. Same setup as o1."""
+    CK = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+    B0 = BASE.replace('eval_each_steps=10 ', 'eval_each_steps=0 ')
+    G = {'o2_a': [('orth10_lam30', 'ortho_coef=10 lam=30'), ('orth30_lam30', 'ortho_coef=30 lam=30'), ('orth10_lrc1', 'ortho_coef=10 lr_coef=1'), ('orth30_lrc1', 'ortho_coef=30 lr_coef=1')],
+         'o2_b': [('mb300_noq', 'mu_b=300 mu_q=0'), ('mb100_orth10', 'mu_b=100 ortho_coef=10'), ('mb30', 'mu_b=30'), ('mq05_orth10', 'mu_b=0 ortho_coef=10')],
+         'o2_c': [('lam3', 'lam=3'), ('lam1', 'lam=1'), ('lam10_orth10', 'lam=10 ortho_coef=10'), ('lam30_lrc1', 'lam=30 lr_coef=1')],
+         'o2_d': [('bs4096', 'batch_size=4096'), ('nest8192', 'n_est=8192'), ('bcos0', 'b_cosine=0'), ('bs4096_orth10', 'batch_size=4096 ortho_coef=10')]}
+    for j, runs in G.items():
+        cmds = ['python fb_continual_temp.py env_name=walker checkpoint=%s tasks=run %s mu_b=300 mu_q=0.5 %s model_dir=models/eps/%s_%s' % (CK, B0, x, j, n) for n, x in runs]
+        subprocess.run([sys.executable, Q, 'add', j, '--time', '1:00:00', '--title', 'Orthonormality of the single-task B stage (run), companions of o1: ' + ', '.join(n for n, _ in runs)] + sum([['--cmd', c] for c in cmds], []), check=True)
+
+
 def main():
     wave = sys.argv[1]
     if wave == 'o1':
         return o1()
+    if wave == 'o2':
+        return o2()
     if wave == 'e4':
         WAVES['e4'] = e4_wave([tuple(x.split(',')) for x in sys.argv[2].split(';')])      # e.g. "100,0.5;300,0.5"
     for job, (title, items) in WAVES[wave].items():

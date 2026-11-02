@@ -186,3 +186,9 @@ if __name__ == '__main__':
         for j, (st, ev, runs) in jobs.items():
             add(j, 'Retention test, 8-task stream model, whitened random latents: ' + ', '.join(n for n, *_ in runs), [('m16_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
                 extra={'m16_' + n: B + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})
+    if sys.argv[1] == 'm17':
+        # generality of the best setting: the stream model learning each of the other tasks alone (whitened random latents, p = 0.25)
+        S8 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 multi_task_frac=0.25 '
+        runs = [('s8_stand_p25', 'stand'), ('s8_supine_p25', 'supine'), ('s8_split_p25', 'split'), ('s8_flamingo_p25', 'flamingo_r')]
+        add('m17_a', 'Retention test, 8-task stream model learning one task: ' + ', '.join(t for _, t in runs), [('m17_' + n, S8) for n, _ in runs], steps=300000, every=30, extra={'m17_' + n: B + 'tasks=' + t for n, t in runs})

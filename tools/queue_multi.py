@@ -114,5 +114,5 @@ if __name__ == '__main__':
                 extra={n: X % t for n, _, t in runs})
     if sys.argv[1] == 'm9smoke':
         E = 'models/eps/'
-        add('m9_smoke', 'Smoke test of kd_actor / kd_q (finetune=multi, run learned, 2000 updates, no rollouts)', [('m9_smoke', E + 'e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle')], '0:25:00', 2000, 1,
-            extra='multi_task_frac=1 z_task_spread=0 eval_stream_only=0 eval_rollouts=0 num_evals=2 tasks=%s multi_new=run kd_actor=1 kd_q=1' % T8)
+        add('m9_smoke', 'Smoke test of kd_actor / kd_q on generic latents (finetune=multi, run learned, 2000 updates, no rollouts)', [('m9_smoke', E + 'e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle')], '0:25:00', 2000, 1,
+            extra='multi_task_frac=1 z_task_spread=0 eval_stream_only=0 eval_rollouts=0 num_evals=2 tasks=run kd_actor=1 kd_q=1')

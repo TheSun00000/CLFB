@@ -64,3 +64,9 @@ Tracker: snapshot/jobs and curves pushed, 23 tracking docs + family 'retention' 
 
 ## 2026-11-02 (night 2)
 - Spectrum of Sigma along the stream and for the single-task checkpoints; orthonormality experiments o1-o3 (ortho_coef, lam, lr_coef, mu_b, mu_q, fb_objective); fix = ortho_coef >= 30, user chose 100. V100 dev tested (works, 2x slower), H100 tried and removed. Pipeline redone with ortho_coef 100 (q1, m23); results in docs/joint_plan.md part D and the tracker Updates entry 2026-11-02-ortho. Open: jump_any and kick_l still drop when other tasks are learned; m23_e / m23_f (single-task B) were running when the session was closed.
+
+## 2026-11-02 (night 3): tracker refresh
+- m23_e / m23_f finished (single-task B, ortho 100, with and without random latents). Results in docs/joint_plan.md part D and in the tracker Update 2026-11-02-ortho (section 6). snapshot/jobs (4 shards) and snapshot/curves (7 shards) pushed. The m-waves have no tracking docs (`tools/describe_jobs.py` has no branch for finetune=multi and stops with KeyError on those commands: no individual rows in Experiments / Results for them, only Updates).
+
+## 2026-11-02 (night 4): main table
+- Queued the main table (see decisions.md): 8 jobs on A100 dev plus the H100 test job 1871918; all pending at the time of writing (QOSGrpCpuLimit / Priority). Overview tab of the tracker has the table (empty cells until the runs finish; fill with ArtifactData update of maintable/single_task, cells[task] = "mean ± std").

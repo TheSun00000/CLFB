@@ -153,3 +153,16 @@ if __name__ == '__main__':
         B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=run multi_white=1 '
         V = [('white_p50', 'multi_task_frac=0.5'), ('white_p90', 'multi_task_frac=0.9'), ('white_bmix5_p50', 'multi_task_frac=0.5 multi_bmix=0.5')]
         add('m13_a', 'Retention test, random latents isotropic in whitened B: ' + ', '.join(n for n, _ in V), [('m13_' + n, RUN) for n, _ in V], steps=300000, every=30, extra={'m13_' + n: B + x for n, x in V})
+    if sys.argv[1] == 'm14':
+        # m13: whitened random latents keep supine (946 -> 994) and raise run to 438; split (990 -> 657) and flamingo_r (746 -> 332) still drop. Smaller p, repeat, other tasks, longer.
+        E = 'models/eps/'
+        RUN = E + 'e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle'
+        KICK = E + 'e3b_mb300_mq0.5_kick_l_r1/fb_stage_1_kick_l.pickle'
+        PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 '
+        jobs = {'m14_a': (300000, 30, [('white_p25', RUN, 'run', 'multi_task_frac=0.25'), ('white_p10', RUN, 'run', 'multi_task_frac=0.1'), ('white_p50_rep', RUN, 'run', 'multi_task_frac=0.5')]),
+                'm14_b': (300000, 30, [('kick_white_p50', KICK, 'kick_l', 'multi_task_frac=0.5'), ('kick_white_p25', KICK, 'kick_l', 'multi_task_frac=0.25'), ('pre_white_p50', PRE, 'run', 'multi_task_frac=0.5')]),
+                'm14_c': (1000000, 100, [('white_p25_1M', RUN, 'run', 'multi_task_frac=0.25'), ('white_p50_1M', RUN, 'run', 'multi_task_frac=0.5')])}
+        for j, (st, ev, runs) in jobs.items():
+            add(j, 'Retention test, whitened random latents: ' + ', '.join(n for n, *_ in runs), [('m14_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
+                extra={'m14_' + n: B + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})

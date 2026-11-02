@@ -85,6 +85,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
     finetune=multi          B frozen (checkpoint=any stage pickle). ONE stage of steps_per_stage updates where F (Q loss only, reward B(s')^T Sigma^-1 z,
                             Sigma on n_big states; L_FB / ortho / L_rec / R^B / R^Q are not computed at all) and the actor (TD3) are trained on
                             z = latent of a random task of tasks= (fresh readout with the checkpoint's B, spread z_task_spread) with prob multi_task_frac
@@ -1019,7 +1020,10 @@ if __name__ == '__main__':
             if cfg.finetune == 'multi':
                 # z = noisy latent of a random task (prob multi_task_frac) or uniform on the sphere; the reward of the Q loss is B(s')^T Sigma^-1 z
                 k_a, k_b, k_c, k_d = jax.random.split(jax.random.fold_in(random_key, 21), 4)
-                t_idx  = jnp.minimum((jax.random.uniform(k_a, (bs,)) * sd.n_atoms).astype(jnp.int32), sd.n_atoms - 1)
+                K_at   = sd.atoms.shape[0]
+                w_t    = sd.z_cond[:K_at]                      # task sampling weights (multi_task_w), zeros = uniform
+                w_t    = jnp.where(w_t.sum() > 0, w_t, jnp.ones_like(w_t))
+                t_idx  = jax.random.categorical(k_a, jnp.log(w_t + 1e-9), shape=(bs,))
                 z_t    = math.sqrt(d) * normalize(normalize(sd.atoms[t_idx]) + cfg.z_task_spread * normalize(jax.random.normal(k_b, (bs, d))))
                 z      = jax.lax.stop_gradient(jnp.where(jax.random.uniform(k_d, (bs, 1)) < cfg.multi_task_frac, z_t, self.sample_z(k_c, bs)))
             else:
@@ -1782,9 +1786,14 @@ if __name__ == '__main__':
             z_run = jnp.mean(lab_r[:, None] * backward_apply(B_ck, replay_buffer.obs[idx_lab]), axis=0)
             zs.append(math.sqrt(Z_DIM) * normalize(z_run))
         zero = jnp.zeros(Z_DIM)
+        w_cond = zero
+        if 'multi_task_w' in kwargs:       # task sampling weights, one per task of tasks=, e.g. multi_task_w=1,3,3,1,3,3,1,1 (stored in z_cond, which finetune=multi does not use otherwise)
+            ws = [float(x) for x in str(kwargs['multi_task_w']).strip('[]').split(',')]
+            assert len(ws) == len(TASKS), 'multi_task_w needs one weight per task'
+            w_cond = zero.at[:len(ws)].set(jnp.asarray(ws))
         stage_data = StageData(old_params=train_state.fb_params, sigma_old_inv=sig_inv, lab_obs=replay_buffer.obs[idx_lab], lab_r=lab_r,
                                atoms=jnp.stack(zs), n_atoms=jnp.asarray(len(zs), dtype=jnp.int32),
-                               z_run=zero, z_cond=zero, w_fit=zero, w_q=zero)
+                               z_run=zero, z_cond=w_cond, w_fit=zero, w_q=zero)
         print(f'finetune=multi: {len(zs)} task latents {TASKS}, multi_task_frac={fb_config.multi_task_frac}, spread={fb_config.z_task_spread}')
         for chunk in tqdm(range(CHUNKS_PER_STAGE), desc='multi'):
             start_time = time.time()

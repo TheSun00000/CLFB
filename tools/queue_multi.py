@@ -79,3 +79,16 @@ if __name__ == '__main__':
         V = [('m5_sp0', 'z_task_spread=0', 'spread 0 (exact task latents)'), ('m5_lr3e4', 'lr=3e-4', 'lr 3e-4'), ('m5_bs4096', 'batch_size=4096', 'batch 4096')]
         for n, ex, what in V:
             add(n, 'Joint F + actor, 8 tasks, 100%% task-driven z, B frozen: %s (mu_b 300 stream, 500k updates)' % what, [(n, MB1)], extra='multi_task_frac=1 ' + ex)
+    if sys.argv[1] == 'm6':
+        # m4/m5 result: 100% task-driven z works (spread 0: stand 959 run 432 flip 875 jump_any 357 kick_l 332 split 998 flamingo 987, last 3 evals). Remaining gap: kick_l, flip, jump_any, run.
+        # One change at a time from the m5_sp0 setting (8 tasks, frac 1, spread 0, mu_b 300 stream seed 1, 500k updates). 3 runs per job.
+        E = 'models/eps/'
+        MB1, MB2, CT = [E + 'e7_stream_s8_a099_%s/fb_stage_8_flip.pickle' % x if x != 'ctrl' else E + 'e7_stream_s8_ctrl_r1/fb_stage_8_flip.pickle' for x in ('mb300_r1', 'mb300_r2', 'ctrl')]
+        B = 'multi_task_frac=1 z_task_spread=0 '
+        HARD = 'multi_task_w=1,3,3,1,3,3,1,1 '
+        jobs = {'m6_a': [('m6_bs4096', MB1, B + 'batch_size=4096'), ('m6_tau005', MB1, B + 'fb_target_tau=0.005'), ('m6_lr5e5', MB1, B + 'lr=5e-5')],
+                'm6_b': [('m6_bc01', MB1, B + 'bc_coef=0.1'), ('m6_bc05', MB1, B + 'bc_coef=0.5'), ('m6_disc098', MB1, B + 'discount=0.98')],
+                'm6_c': [('m6_hardw', MB1, B + HARD), ('m6_hardw_bs4096', MB1, B + HARD + 'batch_size=4096'), ('m6_repeat', MB1, B)],
+                'm6_d': [('m6_s2', MB2, B), ('m6_ctrl', CT, B), ('m6_hardw_s2', MB2, B + HARD)]}
+        for j, runs in jobs.items():
+            add(j, 'Joint F + actor, 8 tasks, spread 0, 100%% task-driven: ' + ', '.join(n[3:] for n, _, _ in runs), [(n, c) for n, c, _ in runs], extra={n: x for n, _, x in runs})

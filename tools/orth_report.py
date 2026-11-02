@@ -4,7 +4,7 @@ import csv, glob, os, re, sys
 tasks = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
 flt = sys.argv[1] if len(sys.argv) > 1 else ''
 rows = []
-for d in sorted(glob.glob('logs/*FBcontinual-walker-run'), key=os.path.getmtime):
+for d in sorted(glob.glob('logs/*FBcontinual-walker-run*'), key=os.path.getmtime):
     info = open(d + '/info.txt').read()
     m = re.search(r'model_dir=models/eps/((?:o1|o2_.|o3_.|v100)[\w]*)', info)
     if not m or flt not in m.group(1): continue

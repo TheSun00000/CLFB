@@ -85,6 +85,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    multi_randtask=0        finetune=multi: fraction of the random latents drawn as E[r B] of random threshold rewards on one observation coordinate (task-like random rewards)
     multi_white=0           finetune=multi: 1 = the uniform random latents become sqrt(d) normalize(Sigma^1/2 g) (isotropic random rewards in the whitened B space)
     multi_bmix=0            finetune=multi: fraction of the non-task latents drawn as B(s) of random states (pretraining distribution) instead of uniform on the sphere
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
@@ -941,6 +942,7 @@ if __name__ == '__main__':
         # --- critic loss / fine-tuning ---
         fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
         finetune:            str   = 'none'   # none | actor | critic | reward_critic | multi (see docstring)
+        multi_randtask:      float = 0.0      # finetune=multi: fraction of the random latents that are latents E[r B] of random threshold rewards (one observation coordinate, random sign / quantile) on the batch
         multi_white:         bool  = False    # finetune=multi: the uniform random latents are sqrt(d) normalize(Sigma^1/2 g): isotropic random linear rewards in the whitened B space (energy of the reward does not blow up in low-variance directions)
         multi_bmix:          float = 0.0      # finetune=multi: fraction of the NON-task latents that are B(s) of random states (the pretraining distribution) instead of uniform on the sphere
         kd_actor:            float = 0.0      # finetune=multi: weight of ||pi(s,z) - pi_start(s,z)||^2 on generic latents (sphere / B(s))
@@ -1060,6 +1062,20 @@ if __name__ == '__main__':
                     k_e, k_f = jax.random.split(jax.random.fold_in(random_key, 23))
                     B_r = jax.lax.stop_gradient(self.backward_net.apply({'params': ts.fb_params['backward']}, obs[jax.random.permutation(k_e, bs)]))
                     z_r = jnp.where(jax.random.uniform(k_f, (bs, 1)) < cfg.multi_bmix, B_r, z_r)
+                if cfg.multi_randtask > 0:     # latents of random 'task-like' rewards: smooth threshold of one observation coordinate, z = E_batch[r B(s)]
+                    k_g1, k_g2, k_g3, k_g4 = jax.random.split(jax.random.fold_in(random_key, 24), 4)
+                    G_n  = 64
+                    cidx = jax.random.randint(k_g1, (G_n,), 0, obs.shape[-1])
+                    sgn  = jnp.where(jax.random.bernoulli(k_g2, 0.5, (G_n,)), 1.0, -1.0)
+                    xg   = obs[:, cidx] * sgn[None, :]                                     # [bs, G]
+                    qg   = jax.random.uniform(k_g3, (G_n,), minval=0.6, maxval=0.98)
+                    thr  = jnp.take_along_axis(jnp.sort(xg, axis=0), jnp.minimum((qg * bs).astype(jnp.int32), bs - 1)[None, :], axis=0)[0]   # [G]
+                    sd_g = xg.std(axis=0) + 1e-6
+                    rg   = jnp.clip((xg - thr[None, :]) / sd_g[None, :] + 1.0, 0.0, 1.0)  # [bs, G]: 1 above the threshold, linear decay over one std below it
+                    Bg   = jax.lax.stop_gradient(self.backward_net.apply({'params': ts.fb_params['backward']}, obs))
+                    zg   = math.sqrt(d) * normalize(rg.T @ Bg / bs)                          # [G, d]
+                    zg_i = zg[jax.random.randint(k_g4, (bs,), 0, G_n)]
+                    z_r  = jnp.where(jax.random.uniform(jax.random.fold_in(k_g4, 1), (bs, 1)) < cfg.multi_randtask, zg_i, z_r)
                 z      = jax.lax.stop_gradient(jnp.where(jax.random.uniform(k_d, (bs, 1)) < cfg.multi_task_frac, z_t, z_r))
             else:
                 z = jnp.broadcast_to(sd.z_cond[None, :], (bs, d))
@@ -1397,7 +1413,7 @@ if __name__ == '__main__':
                      ('lr', float), ('lr_coef', float), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
-                     ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('multi_bmix', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
+                     ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('multi_bmix', float), ('multi_randtask', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
         if _k in kwargs:
             fb_config = dataclasses.replace(fb_config, **{_k: _typ(kwargs[_k])})
     if 'target_agg' in kwargs:

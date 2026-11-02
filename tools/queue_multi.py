@@ -207,3 +207,12 @@ if __name__ == '__main__':
         B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=run '
         runs = [('s8_uni_p25', 'multi_task_frac=0.25'), ('s8_uni_p50', 'multi_task_frac=0.5'), ('s8_bmix5_p25', 'multi_task_frac=0.25 multi_bmix=0.5')]
         add('m19_a', 'Ablation from the 8-task stream model: uniform / B(s) random latents instead of whitened: ' + ', '.join(n for n, _ in runs), [('m19_' + n, S8) for n, _ in runs], steps=300000, every=30, extra={'m19_' + n: B + x for n, x in runs})
+    if sys.argv[1] == 'm20':
+        # random latents that look like tasks (threshold rewards on one observation coordinate), from the 8-task stream model, learning run; reference = m15 / m16 (whitened, p 0.25: run 435, jump_any 210 -> 130)
+        S8 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 tasks=run '
+        jobs = {'m20_a': [('s8_rt1_p25', 'run', 'multi_task_frac=0.25 multi_randtask=1'), ('s8_rt5_p25', 'run', 'multi_task_frac=0.25 multi_randtask=0.5'), ('s8_rt1_p50', 'run', 'multi_task_frac=0.5 multi_randtask=1')],
+                'm20_b': [('s8_rt5_p25_kick', 'kick_l', 'multi_task_frac=0.25 multi_randtask=0.5'), ('s8_rt5_p25_split', 'split', 'multi_task_frac=0.25 multi_randtask=0.5'), ('s8_rt5_p25_jump', 'jump_any', 'multi_task_frac=0.25 multi_randtask=0.5')]}
+        for j, runs in jobs.items():
+            add(j, 'Random task-like latents from the stream model: ' + ', '.join(n for n, *_ in runs), [('m20_' + n, S8) for n, *_ in runs], steps=300000, every=30,
+                extra={'m20_' + n: B + 'tasks=%s %s' % (t, x) for n, t, x in runs})

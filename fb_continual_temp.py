@@ -1854,6 +1854,20 @@ if __name__ == '__main__':
         stage_data = StageData(old_params=train_state.fb_params, sigma_old_inv=sig_inv, lab_obs=replay_buffer.obs[idx_lab], lab_r=lab_r,
                                atoms=jnp.stack(zs), n_atoms=jnp.asarray(len(zs), dtype=jnp.int32),
                                z_run=zero, z_cond=w_cond, w_fit=zero, w_q=zero, old_actor=jax.tree_util.tree_map(jnp.copy, train_state.actor_params), sig_half=sig_half)
+        if 'sigma_report' in kwargs:       # diagnostic: spectrum of Sigma = E[B B^T] and reward energy z^T Sigma^-1 z of uniform / whitened / task latents, then exit
+            ev = np.asarray(jnp.linalg.eigvalsh(B_big.T @ B_big / B_big.shape[0]))
+            g = normalize(jax.random.normal(next_stage_key(), (4096, Z_DIM)))
+            z_u = math.sqrt(Z_DIM) * g
+            z_w = math.sqrt(Z_DIM) * normalize(g @ sig_half)
+            en = lambda z: np.asarray(jnp.einsum('nd,de,ne->n', z, sig_inv, z))
+            rep = {'eig_min': float(ev.min()), 'eig_q10': float(np.quantile(ev, 0.1)), 'eig_median': float(np.median(ev)), 'eig_max': float(ev.max()), 'trace': float(ev.sum()),
+                   'trace_inv': float((1 / np.maximum(ev, 1e-12)).sum()), 'energy_uniform_mean': float(en(z_u).mean()), 'energy_uniform_q90': float(np.quantile(en(z_u), 0.9)),
+                   'energy_whitened_mean': float(en(z_w).mean()), 'energy_whitened_q90': float(np.quantile(en(z_w), 0.9)),
+                   'energy_tasks': {t: float(en(z[None])[0]) for t, z in zip(TASKS, zs)}}
+            import json
+            print('SIGMA_REPORT', json.dumps(rep))
+            json.dump(rep, open(f'{LOGS_FOLDER}/sigma_report.json', 'w'))
+            sys.exit(0)
         print(f'finetune=multi: {len(zs)} task latents {TASKS}, multi_task_frac={fb_config.multi_task_frac}, spread={fb_config.z_task_spread}')
         for chunk in tqdm(range(CHUNKS_PER_STAGE), desc='multi'):
             start_time = time.time()

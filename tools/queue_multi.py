@@ -260,3 +260,36 @@ if __name__ == '__main__':
             if only and j not in only: continue
             add(j, 'Pipeline with ortho_coef 100, F + actor: ' + ', '.join(n for n, *_ in runs), [('q_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
                 extra={'q_' + n: base + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})
+    if sys.argv[1] == 'm24':
+        # H100 dev (user: at most 4 jobs there): scripts written here (queue.py's header is A100), submitted by hand with sbatch. Stream seed 1 of the ortho_coef=100 pipeline, 20 episodes per task.
+        E = 'models/eps/'
+        S1 = E + 'q1_s8_o100_r1/fb_stage_8_flip.pickle'
+        B20 = 'z_task_spread=0 eval_stream_only=0 num_evals=20 tasks=run '
+        W = 'multi_white=1 '
+        HDR = """#!/bin/bash
+#SBATCH --output=.slurm_logs/%x_%j.out
+#SBATCH --error=.slurm_logs/%x_%j.err
+#SBATCH --time=1:55:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=24
+#SBATCH --gres=gpu:1
+#SBATCH --account=vcj@h100
+#SBATCH -C h100
+#SBATCH --qos=qos_gpu_h100-dev
+
+module purge
+module load arch/h100
+module load pytorch-gpu/py3/2.4.0
+module unload cudnn
+module load cudnn/9.8.0.87-cuda
+conda activate jax_env
+
+mkdir -p models logs
+"""
+        jobs = {'h1': [('h_s1_run_white_p25_a', W + 'multi_task_frac=0.25'), ('h_s1_run_white_p25_b', W + 'multi_task_frac=0.25'), ('h_s1_run_white_p25_c', W + 'multi_task_frac=0.25')],
+                'h2': [('h_s1_run_uni_p25', 'multi_task_frac=0.25'), ('h_s1_run_white_p50', W + 'multi_task_frac=0.5'), ('h_s1_run_p1', 'multi_task_frac=1')],
+                'h3': [('h_s1_run_white_p10', W + 'multi_task_frac=0.1'), ('h_s1_run_white_p25_bs4096', W + 'multi_task_frac=0.25 batch_size=4096'), ('h_s1_run_white_p25_lr3e5', W + 'multi_task_frac=0.25 lr=3e-5')],
+                'h4': [('h_s1_run_white_p25_1M', W + 'multi_task_frac=0.25')]}
+        for j, runs in jobs.items():
+            cmds = [cmdline(n, S1, 1000000 if n.endswith('1M') else 300000, 100, B20 + x) for n, x in runs]
+            open('scripts/queue/%s.sh' % j, 'w').write(HDR + 'echo "Running: %s"\n' % cmds[0] + '\n'.join(cmds) + '\n')

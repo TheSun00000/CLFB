@@ -201,3 +201,9 @@ if __name__ == '__main__':
         cmds = [cmdline('sigma_' + n, c, 1000, 1, 'sigma_report=1 num_evals=1 eval_baseline=0 eval_rollouts=0') for n, c in (('pre', PRE), ('s8', S8), ('run', RUN))]
         cmds.append(cmdline('m18_s8_white_p25_bs4096', S8, 300000, 30, 'z_task_spread=0 eval_stream_only=0 num_evals=5 multi_white=1 tasks=run multi_task_frac=0.25 batch_size=4096'))
         subprocess.run([sys.executable, Q, 'add', 'm18_a', '--time', '1:55:00', '--title', 'Spectrum of Sigma (pretrained, stream model, run model) + stream model learning run, whitened p = 0.25, batch 4096'] + sum([['--cmd', c] for c in cmds], []), check=True)
+    if sys.argv[1] == 'm19':
+        # ablation from the 8-task stream model (Sigma well conditioned there): uniform / B(s) random latents instead of whitened ones, same p as m15
+        S8 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=run '
+        runs = [('s8_uni_p25', 'multi_task_frac=0.25'), ('s8_uni_p50', 'multi_task_frac=0.5'), ('s8_bmix5_p25', 'multi_task_frac=0.25 multi_bmix=0.5')]
+        add('m19_a', 'Ablation from the 8-task stream model: uniform / B(s) random latents instead of whitened: ' + ', '.join(n for n, _ in runs), [('m19_' + n, S8) for n, _ in runs], steps=300000, every=30, extra={'m19_' + n: B + x for n, x in runs})

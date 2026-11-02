@@ -42,7 +42,7 @@ Flags:
     env_name=      cheetah | walker | quadruped | antmaze | pointmaze           (required)
     checkpoint=    path of the pretrained FB pickle                              (required)
     tasks=         ordered list of eval-task labels of the env (>= 1, unique): the continual stream.
-                   labels: cheetah: vel10Back vel2Back vel2 vel10 flip | walker: stand walk vel8 run flip + (fb_continual_temp.py only) spin_back kick_r lean_a jump knees_bent split kick_l jump_any supine flamingo_r
+                   labels: cheetah: vel10Back vel2Back vel2 vel10 flip + (new) jump kick_b spread | walker: stand walk vel8 run flip + (fb_continual_temp.py only) spin_back kick_r lean_a jump knees_bent split kick_l jump_any supine flamingo_r
                            quadruped: stand walk run jump | pointmaze: goal_0_20 goal_20_20 goal_20_0 goal_4_4 goal_12_12
                            antmaze: goal_bottom ... (see `benchmarks` below)
     seed=<int>               default: random (logged in info.txt)
@@ -360,6 +360,17 @@ if __name__ == '__main__':
         bound    = float(abs(param))
         return tolerance(velocity, bound, INF, bound, 'linear', 0.0)
 
+    # Cheetah, tasks added on the observation (2026-11-02, tools/cheetah_design.py): aux = [horizontal_velocity, angmomentum, obs(17)], obs[0:8] = position, obs[8:17] = velocity
+    def cheetah_new_reward(aux, param):
+        o = aux[..., 2:19]
+        if param == 'jump':           # upward velocity >= 3
+            return tolerance(o[..., 9], 3.0, INF, 3.0)
+        if param == 'kick_b':         # back thigh swinging forward >= 20 rad/s
+            return tolerance(o[..., 11], 20.0, INF, 20.0)
+        if param == 'spread':         # the two thighs far apart: |bthigh - fthigh| >= 1.2 rad
+            return tolerance(jnp.abs(o[..., 2] - o[..., 5]), 1.2, INF, 0.8)
+        raise NotImplementedError(param)
+
     # Walker: aux = [horizontal_velocity, torso_upright, torso_height, angmomentum]
     def walker_reward(aux, param):
         _STAND_HEIGHT = 1.2
@@ -528,6 +539,7 @@ if __name__ == '__main__':
             aux = np.concatenate((
                 np.load(f'{DATASET_FOLDER}/aux_cheetah.npy').reshape(10000, 1000, 1),
                 np.load(f'{DATASET_FOLDER}/angmomentum_aux_cheetah.npy').reshape(10000, 1000, 1),
+                np.asarray(dataset['observations']).reshape(10000, 1000, 17),
             ), axis=-1)
             benchmarks = [
                 (cheetah_reward, 'vel10Back', -10),
@@ -535,6 +547,9 @@ if __name__ == '__main__':
                 (cheetah_reward, 'vel2',        2),
                 (cheetah_reward, 'vel10',      10),
                 (cheetah_reward, 'flip',   'flip'),
+                (cheetah_new_reward, 'jump',   'jump'),
+                (cheetah_new_reward, 'kick_b', 'kick_b'),
+                (cheetah_new_reward, 'spread', 'spread'),
             ]
 
         elif ENV_NAME == 'walker':
@@ -603,7 +618,7 @@ if __name__ == '__main__':
                 return np.concatenate([[physics.horizontal_velocity(), physics.torso_upright(), physics.torso_height(),
                                         physics.named.data.subtree_angmom['torso'][1]], np.asarray(state, dtype=np.float64)])
             if ENV_NAME == 'cheetah':
-                return np.array([physics.speed(), physics.named.data.subtree_angmom['torso'][1]])
+                return np.concatenate([[physics.speed(), physics.named.data.subtree_angmom['torso'][1]], np.asarray(state, dtype=np.float64)])
             com_height = physics.named.data.sensordata['center_of_mass'].copy()[2]   # quadruped
             return np.concatenate([physics.torso_velocity(), np.array([physics.torso_upright()]), np.array([com_height])])
 
@@ -712,6 +727,9 @@ if __name__ == '__main__':
 
     if ENV_NAME == 'walker' and str(kwargs.get('bench', 'all')) == 'final':      # the task list of the study: 3 built-ins + 5 tasks defined on the observation
         _final = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+        benchmarks = [b for lab in _final for b in benchmarks if b[1] == lab]
+    if ENV_NAME == 'cheetah' and str(kwargs.get('bench', 'all')) == 'final':      # cheetah task list of the study: run backward / forward, flip + 3 tasks defined on the observation
+        _final = ['vel10Back', 'vel10', 'flip', 'jump', 'kick_b', 'spread']
         benchmarks = [b for lab in _final for b in benchmarks if b[1] == lab]
     N_BENCH   = len(benchmarks)
     NUM_EVALS = int(kwargs['num_evals']) if 'num_evals' in kwargs else 20

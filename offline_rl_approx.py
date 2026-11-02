@@ -217,6 +217,17 @@ if __name__ == '__main__':
         bound    = float(abs(param))
         return tolerance(velocity, bound, INF, bound, 'linear', 0.0)
 
+    # Cheetah, tasks added on the observation (2026-11-02, tools/cheetah_design.py): aux = [horizontal_velocity, angmomentum, obs(17)], obs[0:8] = position, obs[8:17] = velocity
+    def cheetah_new_reward(aux, param):
+        o = aux[..., 2:19]
+        if param == 'jump':           # upward velocity >= 3
+            return tolerance(o[..., 9], 3.0, INF, 3.0)
+        if param == 'kick_b':         # back thigh swinging forward >= 20 rad/s
+            return tolerance(o[..., 11], 20.0, INF, 20.0)
+        if param == 'spread':         # the two thighs far apart: |bthigh - fthigh| >= 1.2 rad
+            return tolerance(jnp.abs(o[..., 2] - o[..., 5]), 1.2, INF, 0.8)
+        raise NotImplementedError(param)
+
     # Walker: aux = [horizontal_velocity, torso_upright, torso_height, angmomentum]
     def walker_reward(aux, param):
         _STAND_HEIGHT = 1.2
@@ -390,6 +401,7 @@ if __name__ == '__main__':
             aux = np.concatenate((
                 np.load(f'{DATASET_FOLDER}/aux_cheetah.npy').reshape(10000, 1000, 1),
                 np.load(f'{DATASET_FOLDER}/angmomentum_aux_cheetah.npy').reshape(10000, 1000, 1),
+                np.asarray(dataset['observations']).reshape(10000, 1000, 17),
             ), axis=-1)
             benchmarks = [
                 (cheetah_reward, 'vel10Back', -10),
@@ -397,6 +409,9 @@ if __name__ == '__main__':
                 (cheetah_reward, 'vel2',        2),
                 (cheetah_reward, 'vel10',      10),
                 (cheetah_reward, 'flip',   'flip'),
+                (cheetah_new_reward, 'jump',   'jump'),
+                (cheetah_new_reward, 'kick_b', 'kick_b'),
+                (cheetah_new_reward, 'spread', 'spread'),
             ]
 
         elif ENV_NAME == 'walker':
@@ -460,7 +475,7 @@ if __name__ == '__main__':
                 return np.concatenate([[physics.horizontal_velocity(), physics.torso_upright(), physics.torso_height(),
                                         physics.named.data.subtree_angmom['torso'][1]], np.asarray(state, dtype=np.float64)])
             if ENV_NAME == 'cheetah':
-                return np.array([physics.speed(), physics.named.data.subtree_angmom['torso'][1]])
+                return np.concatenate([[physics.speed(), physics.named.data.subtree_angmom['torso'][1]], np.asarray(state, dtype=np.float64)])
             com_height = physics.named.data.sensordata['center_of_mass'].copy()[2]   # quadruped
             return np.concatenate([physics.torso_velocity(), np.array([physics.torso_upright()]), np.array([com_height])])
 

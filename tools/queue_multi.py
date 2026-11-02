@@ -123,7 +123,21 @@ if __name__ == '__main__':
         B = 'tasks=run z_task_spread=0 eval_stream_only=0 num_evals=5 '
         V = [('mix50', 'multi_task_frac=0.5'), ('mix90', 'multi_task_frac=0.9'), ('mix25', 'multi_task_frac=0.25'),
              ('kdA1', 'multi_task_frac=1 kd_actor=1'), ('kdQ1', 'multi_task_frac=1 kd_q=1'), ('kdAQ1', 'multi_task_frac=1 kd_actor=1 kd_q=1'),
-             ('kdAQ10', 'multi_task_frac=1 kd_actor=10 kd_q=10'), ('lr3e5', 'multi_task_frac=1 lr=3e-5'), ('mix50_kdAQ1', 'multi_task_frac=0.5 kd_actor=1 kd_q=1')]
+             ('mix10', 'multi_task_frac=0.1'), ('lr3e5', 'multi_task_frac=1 lr=3e-5'), ('mix50_lr3e5', 'multi_task_frac=0.5 lr=3e-5')]
         for i in range(0, len(V), 3):
             runs = [('m10_' + n, CK) for n, _ in V[i:i + 3]]
             add('m10_%d' % (i // 3), 'Retention test, generic latents only: ' + ', '.join(n for n, _ in V[i:i + 3]), runs, steps=300000, every=30, extra={'m10_' + n: B + x for n, x in V[i:i + 3]})
+    if sys.argv[1] == 'm11':
+        # overnight round 1 of the retention test (user: more steps, other p, no new loss). tasks=run (labels of run only), generic latents for the rest, 8 tasks evaluated, B frozen.
+        E = 'models/eps/'
+        RUN = E + 'e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle'
+        KICK = E + 'e3b_mb300_mq0.5_kick_l_r1/fb_stage_1_kick_l.pickle'
+        PRE = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 '
+        jobs = {'m11_a': (300000, 30, [('mix10', RUN, 'run', 'multi_task_frac=0.1'), ('lr3e5', RUN, 'run', 'multi_task_frac=1 lr=3e-5'), ('mix50_lr3e5', RUN, 'run', 'multi_task_frac=0.5 lr=3e-5')]),
+                'm11_b': (1000000, 100, [('mix50_1M', RUN, 'run', 'multi_task_frac=0.5'), ('mix90_1M', RUN, 'run', 'multi_task_frac=0.9')]),
+                'm11_c': (300000, 30, [('mix50_bs4096', RUN, 'run', 'multi_task_frac=0.5 batch_size=4096'), ('mix90_bs4096', RUN, 'run', 'multi_task_frac=0.9 batch_size=4096'), ('pre_mix50', PRE, 'run', 'multi_task_frac=0.5')]),
+                'm11_d': (300000, 30, [('kick_mix50', KICK, 'kick_l', 'multi_task_frac=0.5'), ('kick_mix90', KICK, 'kick_l', 'multi_task_frac=0.9'), ('kick_mix25', KICK, 'kick_l', 'multi_task_frac=0.25')])}
+        for j, (st, ev, runs) in jobs.items():
+            add(j, 'Retention test (generic latents), ' + ', '.join(n for n, *_ in runs), [('m11_' + n, c) for n, c, *_ in runs], steps=st, every=ev,
+                extra={'m11_' + n: B + 'tasks=%s %s' % (t, x) for n, c, t, x in runs})

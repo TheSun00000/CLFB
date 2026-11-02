@@ -132,12 +132,26 @@ def o2():
         subprocess.run([sys.executable, Q, 'add', j, '--time', '1:00:00', '--title', 'Orthonormality of the single-task B stage (run), companions of o1: ' + ', '.join(n for n, _ in runs)] + sum([['--cmd', c] for c in cmds], []), check=True)
 
 
+def o3():
+    """mu_q does not touch B directly (z' = sg(T z), the gradient goes to F only). If the collapse of Sigma comes through the coupling of F and B in L_FB, it should disappear with fb_objective=0
+    and shrink with a smaller mu_q. Same setup as o1 (run, mu_b 300, 30k updates, eps only); 2 jobs of 4 runs."""
+    CK = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+    B0 = BASE.replace('eval_each_steps=10 ', 'eval_each_steps=0 ')
+    G = {'o3_a': [('fbobj0', 'mu_b=300 mu_q=0.5 fb_objective=0'), ('mq01', 'mu_b=300 mu_q=0.1'), ('mq02', 'mu_b=300 mu_q=0.2'), ('mq005', 'mu_b=300 mu_q=0.05')],
+         'o3_b': [('fbobj0_orth10', 'mu_b=300 mu_q=0.5 fb_objective=0 ortho_coef=10'), ('mq02_orth10', 'mu_b=300 mu_q=0.2 ortho_coef=10'), ('mq01_orth10', 'mu_b=300 mu_q=0.1 ortho_coef=10'), ('ref_rep3', 'mu_b=300 mu_q=0.5')]}
+    for j, runs in G.items():
+        cmds = ['python fb_continual_temp.py env_name=walker checkpoint=%s tasks=run %s %s model_dir=models/eps/%s_%s' % (CK, B0, x, j, n) for n, x in runs]
+        subprocess.run([sys.executable, Q, 'add', j, '--time', '1:00:00', '--title', 'Orthonormality of the single-task B stage (run): is it mu_q through L_FB? ' + ', '.join(n for n, _ in runs)] + sum([['--cmd', c] for c in cmds], []), check=True)
+
+
 def main():
     wave = sys.argv[1]
     if wave == 'o1':
         return o1()
     if wave == 'o2':
         return o2()
+    if wave == 'o3':
+        return o3()
     if wave == 'e4':
         WAVES['e4'] = e4_wave([tuple(x.split(',')) for x in sys.argv[2].split(';')])      # e.g. "100,0.5;300,0.5"
     for job, (title, items) in WAVES[wave].items():

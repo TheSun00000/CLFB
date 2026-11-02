@@ -108,8 +108,21 @@ def e4_wave(settings):
     return jobs
 
 
+# o1 (2026-11-02, user): fix the loss of orthonormality of the single-task B stage (Sigma of B after 30k updates of run with mu_b 300 + mu_q 0.5: smallest eigenvalue 0.00035, trace Sigma^-1 3374; pretrained 0.055 / 81).
+# Task run only, eps only, 30k updates, one existing hyper-parameter changed at a time; logs/<run>/sigma_log.csv has the spectrum at the end of the stage. One job of 10 runs.
+def o1():
+    CK = 'models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle'
+    V = [('ref', ''), ('ref_rep', ''), ('orth3', 'ortho_coef=3'), ('orth10', 'ortho_coef=10'), ('orth30', 'ortho_coef=30'), ('orth100', 'ortho_coef=100'), ('orth300', 'ortho_coef=300'),
+         ('lam30', 'lam=30'), ('lam10', 'lam=10'), ('lrc1', 'lr_coef=1')]
+    cmds = ['python fb_continual_temp.py env_name=walker checkpoint=%s tasks=run %s %s mu_b=300 mu_q=0.5 model_dir=models/eps/o1_%s' % (CK, BASE.replace('eval_each_steps=10 ', 'eval_each_steps=0 '), x, n) for n, x in V]
+    # later flags win: BASE has lam=100 lr_coef=3, the variant is placed after it
+    subprocess.run([sys.executable, Q, 'add', 'o1_orth', '--time', '1:55:00', '--title', 'Orthonormality of the single-task B stage (run, mu_b 300 + mu_q 0.5): ortho_coef, lam, lr_coef (10 runs of 30k updates, eps only)'] + sum([['--cmd', c] for c in cmds], []), check=True)
+
+
 def main():
     wave = sys.argv[1]
+    if wave == 'o1':
+        return o1()
     if wave == 'e4':
         WAVES['e4'] = e4_wave([tuple(x.split(',')) for x in sys.argv[2].split(';')])      # e.g. "100,0.5;300,0.5"
     for job, (title, items) in WAVES[wave].items():

@@ -1948,5 +1948,15 @@ if __name__ == '__main__':
         latents = end_stage(train_state, stage_data, latents)
         m2s.append(m2_k)
 
+        # spectrum of Sigma = E[B B^T] of the new B on n_big fresh states (new file sigma_log.csv: smallest / 10% / median / largest eigenvalue, trace of Sigma^-1)
+        _Bs = big_backward(train_state.fb_params['backward'], replay_buffer.obs[replay_buffer.sample_indices(next_stage_key(), N_BIG)])
+        _ev = np.asarray(jnp.linalg.eigvalsh(_Bs.T @ _Bs / _Bs.shape[0]))
+        _row = {'stage': k, 'task': task, 'eig_min': float(_ev.min()), 'eig_q10': float(np.quantile(_ev, 0.1)), 'eig_median': float(np.median(_ev)), 'eig_max': float(_ev.max()),
+                'trace_inv': float((1.0 / np.maximum(_ev, 1e-12)).sum())}
+        _new = not os.path.exists(f'{LOGS_FOLDER}/sigma_log.csv')
+        with open(f'{LOGS_FOLDER}/sigma_log.csv', 'a') as _f:
+            _w = csv.DictWriter(_f, fieldnames=list(_row)); _w.writeheader() if _new else None; _w.writerow(_row)
+        print('SIGMA_STAGE', _row)
+
         save_agent(train_state, f"{MODEL_SAVE_FOLDER}/fb_stage_{k}_{task}.pickle", latents, m2s, k)
         run_eval(train_state, k, STEPS_PER_STAGE, 'end', latents, m2s, ft_info, fit_info)

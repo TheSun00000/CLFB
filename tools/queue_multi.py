@@ -147,3 +147,9 @@ if __name__ == '__main__':
         B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=run '
         V = [('bmix5_p50', 'multi_task_frac=0.5 multi_bmix=0.5'), ('bmix5_p90', 'multi_task_frac=0.9 multi_bmix=0.5'), ('bmix10_p50', 'multi_task_frac=0.5 multi_bmix=1')]
         add('m12_a', 'Retention test, latents as in the pretraining: ' + ', '.join(n for n, _ in V), [('m12_' + n, RUN) for n, _ in V], steps=300000, every=30, extra={'m12_' + n: B + x for n, x in V})
+    if sys.argv[1] == 'm13':
+        # random latents isotropic in the whitened B space (multi_white=1): the reward energy of a random latent no longer explodes in low-variance directions of B (kick_l p=0.5 had Q ~ 1500)
+        RUN = 'models/eps/e3b_mb300_mq0.5_run_r1/fb_stage_1_run.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=5 tasks=run multi_white=1 '
+        V = [('white_p50', 'multi_task_frac=0.5'), ('white_p90', 'multi_task_frac=0.9'), ('white_bmix5_p50', 'multi_task_frac=0.5 multi_bmix=0.5')]
+        add('m13_a', 'Retention test, random latents isotropic in whitened B: ' + ', '.join(n for n, _ in V), [('m13_' + n, RUN) for n, _ in V], steps=300000, every=30, extra={'m13_' + n: B + x for n, x in V})

@@ -85,6 +85,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    multi_white=0           finetune=multi: 1 = the uniform random latents become sqrt(d) normalize(Sigma^1/2 g) (isotropic random rewards in the whitened B space)
     multi_bmix=0            finetune=multi: fraction of the non-task latents drawn as B(s) of random states (pretraining distribution) instead of uniform on the sphere
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
                             (uniform sphere, mix_ratio of them B(s) of shuffled states; no knowledge of any other task): retention of F and the actor
@@ -940,6 +941,7 @@ if __name__ == '__main__':
         # --- critic loss / fine-tuning ---
         fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
         finetune:            str   = 'none'   # none | actor | critic | reward_critic | multi (see docstring)
+        multi_white:         bool  = False    # finetune=multi: the uniform random latents are sqrt(d) normalize(Sigma^1/2 g): isotropic random linear rewards in the whitened B space (energy of the reward does not blow up in low-variance directions)
         multi_bmix:          float = 0.0      # finetune=multi: fraction of the NON-task latents that are B(s) of random states (the pretraining distribution) instead of uniform on the sphere
         kd_actor:            float = 0.0      # finetune=multi: weight of ||pi(s,z) - pi_start(s,z)||^2 on generic latents (sphere / B(s))
         kd_q:                float = 0.0      # finetune=multi: weight of the match of Q(s,a,z) = F(s,a,z)^T z to the starting F on generic latents
@@ -967,6 +969,7 @@ if __name__ == '__main__':
         w_fit:         jnp.ndarray     # [d] Sigma_old^-1 z_run : fixed readout, B(s)^T w_fit ~ rbar_k(s)
         w_q:           jnp.ndarray     # [d] Sigma_old^-1 z_cond: fixed readout of the reward in the fine-tuning Q loss
         old_actor:     Any = None      # finetune=multi: actor at the start (for kd_actor)
+        sig_half:      Any = None      # finetune=multi: Sigma^1/2 (for multi_white)
 
     class FBAgent:
 
@@ -1051,6 +1054,8 @@ if __name__ == '__main__':
                 t_idx  = jax.random.categorical(k_a, jnp.log(w_t + 1e-9), shape=(bs,))
                 z_t    = math.sqrt(d) * normalize(normalize(sd.atoms[t_idx]) + cfg.z_task_spread * normalize(jax.random.normal(k_b, (bs, d))))
                 z_r    = self.sample_z(k_c, bs)
+                if cfg.multi_white:
+                    z_r = math.sqrt(d) * normalize(normalize(jax.random.normal(jax.random.fold_in(k_c, 5), (bs, d))) @ sd.sig_half)
                 if cfg.multi_bmix > 0:      # pretraining latent distribution: a fraction of the random latents is B(s) of shuffled states
                     k_e, k_f = jax.random.split(jax.random.fold_in(random_key, 23))
                     B_r = jax.lax.stop_gradient(self.backward_net.apply({'params': ts.fb_params['backward']}, obs[jax.random.permutation(k_e, bs)]))
@@ -1402,6 +1407,8 @@ if __name__ == '__main__':
         fb_config = dataclasses.replace(fb_config, freeze_b=bool(int(kwargs['freeze_b'])))
     if 'freeze_fb' in kwargs:
         fb_config = dataclasses.replace(fb_config, freeze_fb=bool(int(kwargs['freeze_fb'])))
+    if 'multi_white' in kwargs:
+        fb_config = dataclasses.replace(fb_config, multi_white=bool(int(kwargs['multi_white'])))
     if 'cross_fit' in kwargs:
         fb_config = dataclasses.replace(fb_config, cross_fit=bool(int(kwargs['cross_fit'])))
     if 'rec_fixed_w' in kwargs:
@@ -1838,13 +1845,15 @@ if __name__ == '__main__':
             zs.append(math.sqrt(Z_DIM) * normalize(z_run))
         zero = jnp.zeros(Z_DIM)
         w_cond = zero
+        _ev, _U = jnp.linalg.eigh(B_big.T @ B_big / B_big.shape[0] + RIDGE * jnp.eye(Z_DIM))
+        sig_half = (_U * jnp.sqrt(jnp.maximum(_ev, 0.0))) @ _U.T
         if 'multi_task_w' in kwargs:       # task sampling weights, one per task of tasks=, e.g. multi_task_w=1,3,3,1,3,3,1,1 (stored in z_cond, which finetune=multi does not use otherwise)
             ws = [float(x) for x in str(kwargs['multi_task_w']).strip('[]').split(',')]
             assert len(ws) == len(TASKS), 'multi_task_w needs one weight per task'
             w_cond = zero.at[:len(ws)].set(jnp.asarray(ws))
         stage_data = StageData(old_params=train_state.fb_params, sigma_old_inv=sig_inv, lab_obs=replay_buffer.obs[idx_lab], lab_r=lab_r,
                                atoms=jnp.stack(zs), n_atoms=jnp.asarray(len(zs), dtype=jnp.int32),
-                               z_run=zero, z_cond=w_cond, w_fit=zero, w_q=zero, old_actor=jax.tree_util.tree_map(jnp.copy, train_state.actor_params))
+                               z_run=zero, z_cond=w_cond, w_fit=zero, w_q=zero, old_actor=jax.tree_util.tree_map(jnp.copy, train_state.actor_params), sig_half=sig_half)
         print(f'finetune=multi: {len(zs)} task latents {TASKS}, multi_task_frac={fb_config.multi_task_frac}, spread={fb_config.z_task_spread}')
         for chunk in tqdm(range(CHUNKS_PER_STAGE), desc='multi'):
             start_time = time.time()

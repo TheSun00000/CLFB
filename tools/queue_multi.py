@@ -92,3 +92,11 @@ if __name__ == '__main__':
                 'm6_d': [('m6_s2', MB2, B), ('m6_ctrl', CT, B), ('m6_hardw_s2', MB2, B + HARD)]}
         for j, runs in jobs.items():
             add(j, 'Joint F + actor, 8 tasks, spread 0, 100%% task-driven: ' + ', '.join(n[3:] for n, _, _ in runs), [(n, c) for n, c, _ in runs], extra={n: x for n, _, x in runs})
+    if sys.argv[1] == 'm7':
+        # independent of m6: a second repeat of the spread-0 base (noise level), smaller spreads, other weights of the hard tasks and batch 2048
+        MB1 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        B = 'multi_task_frac=1 '
+        jobs = {'m7_a': [('m7_repeat2', MB1, B + 'z_task_spread=0'), ('m7_sp005', MB1, B + 'z_task_spread=0.05'), ('m7_sp01', MB1, B + 'z_task_spread=0.1')],
+                'm7_b': [('m7_hardw2', MB1, B + 'z_task_spread=0 multi_task_w=1,2,2,1,2,2,1,1'), ('m7_hardw5', MB1, B + 'z_task_spread=0 multi_task_w=1,5,5,1,5,5,1,1'), ('m7_bs2048', MB1, B + 'z_task_spread=0 batch_size=2048')]}
+        for j, runs in jobs.items():
+            add(j, 'Joint F + actor, 8 tasks, 100%% task-driven: ' + ', '.join(n[3:] for n, _, _ in runs), [(n, c) for n, c, _ in runs], extra={n: x for n, _, x in runs})

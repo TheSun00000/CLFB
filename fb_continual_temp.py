@@ -1876,7 +1876,7 @@ if __name__ == '__main__':
             z_u = math.sqrt(Z_DIM) * g
             z_w = math.sqrt(Z_DIM) * normalize(g @ sig_half)
             en = lambda z: np.asarray(jnp.einsum('nd,de,ne->n', z, sig_inv, z))
-            rep = {'eig_min': float(ev.min()), 'eig_q10': float(np.quantile(ev, 0.1)), 'eig_median': float(np.median(ev)), 'eig_max': float(ev.max()), 'trace': float(ev.sum()),
+            rep = {'ckpt': str(CHECKPOINT), 'eig_min': float(ev.min()), 'eig_q10': float(np.quantile(ev, 0.1)), 'eig_median': float(np.median(ev)), 'eig_max': float(ev.max()), 'trace': float(ev.sum()),
                    'trace_inv': float((1 / np.maximum(ev, 1e-12)).sum()), 'energy_uniform_mean': float(en(z_u).mean()), 'energy_uniform_q90': float(np.quantile(en(z_u), 0.9)),
                    'energy_whitened_mean': float(en(z_w).mean()), 'energy_whitened_q90': float(np.quantile(en(z_w), 0.9)),
                    'energy_tasks': {t: float(en(z[None])[0]) for t, z in zip(TASKS, zs)}}

@@ -224,3 +224,14 @@ if __name__ == '__main__':
                 'm21_b': [('s8_p1', 'multi_task_frac=1'), ('s8_uni_p25', 'multi_task_frac=0.25'), ('s8_white_p50', 'multi_white=1 multi_task_frac=0.5')]}
         for j, runs in jobs.items():
             add(j, 'Main candidate, 20 episodes per task: ' + ', '.join(n for n, _ in runs), [('m21_' + n, S8) for n, _ in runs], steps=300000, every=100, extra={'m21_' + n: B + x for n, x in runs})
+    if sys.argv[1] == 'm22':
+        # diagnostic: spectrum of Sigma along the 8-task stream (stages 1-7; stage 8 done), the control stream (stages 1, 4, 8) and the single-task checkpoints
+        E = 'models/eps/'
+        SO = ['supine', 'kick_l', 'flamingo_r', 'split', 'jump_any', 'stand', 'run', 'flip']
+        def st(run, k): return E + 'e7_stream_s8_%s_r1/fb_stage_%d_%s.pickle' % (run, k, SO[k - 1])
+        A = [('s8mb300_st%d' % k, st('a099_mb300', k)) for k in range(1, 8)] + [('ctrl_st%d' % k, st('ctrl', k)) for k in (1, 4, 8)]
+        T = ['stand', 'run', 'flip', 'supine', 'jump_any', 'kick_l', 'split', 'flamingo_r']
+        Bq = [('single_mb300_' + t, E + 'e3b_mb300_mq0.5_%s_r1/fb_stage_1_%s.pickle' % (t, t)) for t in T] + [('single_mb100_run', E + 'e3_mb100_mq0.5_run_r1/fb_stage_1_run.pickle'), ('single_mq05_run', E + 'e2_mq0.5_r1/fb_stage_1_run.pickle')]
+        for j, runs in (('m22_a', A), ('m22_b', Bq)):
+            cmds = [cmdline('sigma_' + n, c, 1000, 1, 'sigma_report=1 num_evals=1 eval_baseline=0 eval_rollouts=0') for n, c in runs]
+            subprocess.run([sys.executable, Q, 'add', j, '--time', '1:30:00', '--title', 'Spectrum of Sigma: ' + ', '.join(n for n, _ in runs)] + sum([['--cmd', c] for c in cmds], []), check=True)

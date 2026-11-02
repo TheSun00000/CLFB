@@ -85,6 +85,8 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
                             FIXED, min mean (B(s)^T w_fit - rbar(s))^2, w_fit = Sigma_old^-1 z_k (the fixed-z experiment,
                             warm-started). phase 2: same as finetune=critic with the new B (B frozen).
         rfit_steps=30000 rfit_lr=3e-4 rfit_bs=4096   (phase 1, cosine lr decay)
+    multi_new=<label> kd_actor=0 kd_q=0   finetune=multi: label of the task being learned; kd_actor / kd_q = weights of the anchors of the actor / of Q(s,a,z)=F^T z
+                            to their values at the start of the fine-tuning, on the latents of the OTHER tasks of tasks= (the retention of F and the actor)
     multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
     finetune=multi          B frozen (checkpoint=any stage pickle). ONE stage of steps_per_stage updates where F (Q loss only, reward B(s')^T Sigma^-1 z,
                             Sigma on n_big states; L_FB / ortho / L_rec / R^B / R^Q are not computed at all) and the actor (TD3) are trained on
@@ -937,6 +939,8 @@ if __name__ == '__main__':
         # --- critic loss / fine-tuning ---
         fb_objective:        bool  = True     # True: L_FB + q_loss_coef * Q loss. False: Q loss only (L_FB not computed)
         finetune:            str   = 'none'   # none | actor | critic | reward_critic | multi (see docstring)
+        kd_actor:            float = 0.0      # finetune=multi + multi_new: weight of ||pi(s,z_old) - pi_start(s,z_old)||^2 on the latents of the OTHER tasks
+        kd_q:                float = 0.0      # finetune=multi + multi_new: weight of the match of Q(s,a,z_old) = F(s,a,z_old)^T z_old to the starting F on the other tasks
         multi_task_frac:     float = 0.5      # finetune=multi: fraction of the z that are (noisy) latents of the tasks, the rest is uniform on the sphere
 
     class FBTrainingState(flax.struct.PyTreeNode):
@@ -960,6 +964,7 @@ if __name__ == '__main__':
         z_cond:        jnp.ndarray     # [d] sqrt(d) * normalize(z_run): the fixed task latent of the fine-tuning modes
         w_fit:         jnp.ndarray     # [d] Sigma_old^-1 z_run : fixed readout, B(s)^T w_fit ~ rbar_k(s)
         w_q:           jnp.ndarray     # [d] Sigma_old^-1 z_cond: fixed readout of the reward in the fine-tuning Q loss
+        old_actor:     Any = None      # finetune=multi: actor at the start (for kd_actor)
 
     class FBAgent:
 
@@ -1048,6 +1053,18 @@ if __name__ == '__main__':
                 z = jnp.broadcast_to(sd.z_cond[None, :], (bs, d))
             fb_params, fb_optimizer_state = ts.fb_params, ts.fb_optimizer_state
 
+            use_kd = cfg.finetune == 'multi' and (cfg.kd_actor > 0 or cfg.kd_q > 0)
+            if use_kd:      # latents of the OTHER tasks (mask in sd.z_run set by multi_new=), noisy like the training latents
+                k_o1, k_o2 = jax.random.split(jax.random.fold_in(random_key, 22))
+                m_old = sd.z_run[:sd.atoms.shape[0]]
+                o_idx = jax.random.categorical(k_o1, jnp.log(m_old + 1e-9), shape=(bs,))
+                z_o   = jax.lax.stop_gradient(math.sqrt(d) * normalize(normalize(sd.atoms[o_idx]) + cfg.z_task_spread * normalize(jax.random.normal(k_o2, (bs, d)))))
+                if cfg.kd_q > 0:
+                    Fo1, Fo2 = self.forward_net.apply({'params': sd.old_params['forward']}, obs, z_o, action)
+                    Qo1, Qo2 = jax.lax.stop_gradient((Fo1 * z_o).sum(-1)), jax.lax.stop_gradient((Fo2 * z_o).sum(-1))
+                if cfg.kd_actor > 0:
+                    mu_o_old = jax.lax.stop_gradient(self.actor_net.apply({'params': sd.old_actor}, obs, z_o))
+
             if cfg.finetune in ('critic', 'reward_critic', 'multi'):
                 # Q(s, a) = F(s, a, z)^T z regressed on r(s') + discount * min_heads F_bar(s', a', z)^T z,  a' = pi(s', z) + noise
                 B_next = self.backward_net.apply({'params': ts.fb_params['backward']}, next_obs)
@@ -1064,8 +1081,12 @@ if __name__ == '__main__':
 
                 def q_loss_fn(f_params):
                     F1, F2 = self.forward_net.apply({'params': f_params}, obs, z, action)
-                    return (jnp.mean(((F1 * z).sum(-1) - target_Q) ** 2)
+                    loss = (jnp.mean(((F1 * z).sum(-1) - target_Q) ** 2)
                             + jnp.mean(((F2 * z).sum(-1) - target_Q) ** 2))
+                    if use_kd and cfg.kd_q > 0:
+                        G1, G2 = self.forward_net.apply({'params': f_params}, obs, z_o, action)
+                        loss = loss + cfg.kd_q * (jnp.mean(((G1 * z_o).sum(-1) - Qo1) ** 2) + jnp.mean(((G2 * z_o).sum(-1) - Qo2) ** 2))
+                    return loss
 
                 # gradient on F only; B gets zero gradients and is left untouched
                 q_loss, f_grads = jax.value_and_grad(q_loss_fn)(ts.fb_params['forward'])
@@ -1088,6 +1109,9 @@ if __name__ == '__main__':
                     actor_loss = -Q.mean() / jax.lax.stop_gradient(jnp.abs(Q).mean()) + cfg.bc_coef * sq.mean()
                 else:
                     actor_loss = -Q.mean()
+                if use_kd and cfg.kd_actor > 0:
+                    mu_o = self.actor_net.apply({'params': actor_params}, obs, z_o)
+                    actor_loss = actor_loss + cfg.kd_actor * jnp.mean(jnp.sum((mu_o - mu_o_old) ** 2, axis=-1))
                 return actor_loss, {'actor_loss': actor_loss, 'q': Q.mean(), 'bc_dist': sq.mean()}
 
             (_, actor_metrics), actor_grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(ts.actor_params)
@@ -1359,7 +1383,7 @@ if __name__ == '__main__':
                      ('lr', float), ('lr_coef', float), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
-                     ('multi_task_frac', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
+                     ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
         if _k in kwargs:
             fb_config = dataclasses.replace(fb_config, **{_k: _typ(kwargs[_k])})
     if 'target_agg' in kwargs:
@@ -1809,9 +1833,13 @@ if __name__ == '__main__':
             ws = [float(x) for x in str(kwargs['multi_task_w']).strip('[]').split(',')]
             assert len(ws) == len(TASKS), 'multi_task_w needs one weight per task'
             w_cond = zero.at[:len(ws)].set(jnp.asarray(ws))
+        old_mask = zero
+        if 'multi_new' in kwargs:          # multi_new=<label>: the task being learned; the other tasks of tasks= are the 'old' ones for kd_actor / kd_q
+            assert str(kwargs['multi_new']) in TASKS
+            old_mask = jnp.asarray([0.0 if t == str(kwargs['multi_new']) else 1.0 for t in TASKS] + [0.0] * (Z_DIM - len(TASKS)))
         stage_data = StageData(old_params=train_state.fb_params, sigma_old_inv=sig_inv, lab_obs=replay_buffer.obs[idx_lab], lab_r=lab_r,
                                atoms=jnp.stack(zs), n_atoms=jnp.asarray(len(zs), dtype=jnp.int32),
-                               z_run=zero, z_cond=w_cond, w_fit=zero, w_q=zero)
+                               z_run=old_mask, z_cond=w_cond, w_fit=zero, w_q=zero, old_actor=jax.tree_util.tree_map(jnp.copy, train_state.actor_params))
         print(f'finetune=multi: {len(zs)} task latents {TASKS}, multi_task_frac={fb_config.multi_task_frac}, spread={fb_config.z_task_spread}')
         for chunk in tqdm(range(CHUNKS_PER_STAGE), desc='multi'):
             start_time = time.time()

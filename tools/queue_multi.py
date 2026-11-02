@@ -216,3 +216,11 @@ if __name__ == '__main__':
         for j, runs in jobs.items():
             add(j, 'Random task-like latents from the stream model: ' + ', '.join(n for n, *_ in runs), [('m20_' + n, S8) for n, *_ in runs], steps=300000, every=30,
                 extra={'m20_' + n: B + 'tasks=%s %s' % (t, x) for n, t, x in runs})
+    if sys.argv[1] == 'm21':
+        # the main candidate with 20 episodes per task (less noise), evaluations every 100k: stream model learning run, whitened p = 0.25 (3 seeds), run-only baseline, uniform p = 0.25, whitened p = 0.5
+        S8 = 'models/eps/e7_stream_s8_a099_mb300_r1/fb_stage_8_flip.pickle'
+        B = 'z_task_spread=0 eval_stream_only=0 num_evals=20 tasks=run '
+        jobs = {'m21_a': [('s8_white_p25_a', 'multi_white=1 multi_task_frac=0.25'), ('s8_white_p25_b', 'multi_white=1 multi_task_frac=0.25'), ('s8_white_p25_c', 'multi_white=1 multi_task_frac=0.25')],
+                'm21_b': [('s8_p1', 'multi_task_frac=1'), ('s8_uni_p25', 'multi_task_frac=0.25'), ('s8_white_p50', 'multi_white=1 multi_task_frac=0.5')]}
+        for j, runs in jobs.items():
+            add(j, 'Main candidate, 20 episodes per task: ' + ', '.join(n for n, _ in runs), [('m21_' + n, S8) for n, _ in runs], steps=300000, every=100, extra={'m21_' + n: B + x for n, x in runs})

@@ -31,6 +31,14 @@ if __name__ == '__main__':
             for mb in (100, 300, 1000):
                 cmds = [stage1('c4_' + tag(lam, mb, mq), lam, mb, mq) for mq in (0.1, 0.5, 2)]
                 add('c4_l%s_b%s' % (lam, mb), 'Cheetah hyper-parameters, B stage, eps only: lam %s, mu_b %s, mu_q 0.1 / 0.5 / 2' % (lam, mb), cmds)
+    if sys.argv[1] == 'sweepv':
+        # the B-stage sweep on V100 dev (easy to get): the 7 configs that were still pending on A100, model dirs c4_v_*
+        for lam in (30, 100, 300):
+            for mb in (100, 300, 1000):
+                if (lam, mb) in ((30, 100), (30, 300)): continue
+                cmds = [stage1('c4_v_' + tag(lam, mb, mq), lam, mb, mq) for mq in (0.1, 0.5, 2)]
+                subprocess.run([sys.executable, Q, 'add', 'c4v_l%s_b%s' % (lam, mb), '--gpu', 'v100', '--time', '1:55:00', '--title',
+                                'Cheetah hyper-parameters, B stage, eps only, V100: lam %s, mu_b %s, mu_q 0.1 / 0.5 / 2' % (lam, mb)] + sum([['--cmd', c] for c in cmds], []), check=True)
     if sys.argv[1] == 'full':
         for cfg in sys.argv[2:]:
             lam, mb, mq = cfg.split(',')

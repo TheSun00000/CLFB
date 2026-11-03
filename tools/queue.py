@@ -102,6 +102,22 @@ def cluster_jobs():
     return len(out), dict(l.split('|') for l in out if '|' in l)
 
 
+def cluster_counts():
+    """Submitted jobs per dev partition ('v100' = qos_gpu-dev, 'a100' = the others): the 10-job limit is per QoS."""
+    out = ssh('squeue -u "$USER" -h -r -o "%q"').strip().splitlines()
+    c = {'a100': 0, 'v100': 0}
+    for q in out:
+        c['v100' if q.strip() == 'qos_gpu-dev' else 'a100'] += 1
+    return c
+
+
+def group_of(e):
+    try:
+        return 'v100' if 'vcj@v100' in open(os.path.join(ROOT, e['script'])).read() else 'a100'
+    except OSError:
+        return 'a100'
+
+
 def add(a):
     q = load()
     if any(e['name'] == a.name for e in q['entries']):
@@ -162,8 +178,10 @@ def submit(a):
     q = load()
     queued = [e for e in q['entries'] if e['state'] == 'queued']
     n, _ = cluster_jobs()
-    free = q.get('limit', LIMIT) - n
-    print('%d of %d slots used, %d free, %d queued' % (n, q.get('limit', LIMIT), free, len(queued)))
+    counts = cluster_counts()
+    gfree = {g: q.get('limit', LIMIT) - counts[g] for g in counts}
+    free = max(gfree.values())
+    print('%d jobs (a100 %d, v100 %d, %d free each), %d queued' % (n, counts['a100'], counts['v100'], q.get('limit', LIMIT), len(queued)))
     if free <= 0 or not queued:
         return
     # the cluster needs the scripts: they must be committed and pushed
@@ -174,9 +192,10 @@ def submit(a):
         sys.exit('not submitted: uncommitted changes in scripts/tools/*.py or %s unpushed commit(s): commit and push first' % unpushed)
     todo = []
     for e in queued:
-        if e['slots'] <= free:
+        g = group_of(e)
+        if e['slots'] <= gfree[g]:
             todo.append(e)
-            free -= e['slots']
+            gfree[g] -= e['slots']
     if a.dry_run:
         print('would submit:', [e['name'] for e in todo])
         return

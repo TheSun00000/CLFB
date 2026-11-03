@@ -85,3 +85,6 @@ Why: B retention restores eps and the actor fix restores supine, but split stays
 
 ## 2026-11-03: new cheetah pretrained model
 `fb_pretrain.py env_name=cheetah num_steps=1000000` (defaults, job 1888243, logs/2026-11-03_10-12-26_FBpretrain-cheetah) copied to `saved_models/fb_agent_cheetah_pre2.pickle` on the cluster. User: use this checkpoint for all cheetah experiments from now on. Zero-shot at 1M (5 evals, noisy): vel10 165, vel10Back 233, flip 402; the old checkpoint had vel10 330, vel10Back 400. All earlier cheetah results (tables, hp sweep) used the OLD checkpoint (`fb_agent_classical_cheetah.pickle`) and must be redone / labelled. Goal now: finetuning on vel10 closer to the optimum (round 1 `tools/queue_cheetah_ft.py r1`: p, lr, spread, bc_coef, F frozen or not; B frozen).
+
+## 2026-11-03: alpha = 0 from now on (cheetah)
+User: no `alpha` (atom weight in nu). New B-stage jobs of `tools/queue_cheetah_ft.py` pass `alpha=0` explicitly (nu = uniform sphere only). All cheetah finetune runs up to and including round 5 (ft1-ft5, c4/c5) ran with the script default alpha = 0.5 (not 0.99, which only the walker stream chains used). Nothing was cancelled; the user will say what to do when the running jobs finish.

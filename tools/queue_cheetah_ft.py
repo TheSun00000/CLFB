@@ -33,7 +33,7 @@ if __name__ == '__main__' and sys.argv[1] == 'r1':
 
 def pipe(name, mu_b, mu_q, extra=''):
     s1 = ('python fb_continual_temp.py env_name=cheetah checkpoint=%s tasks=vel10 %s ortho_coef=100 mu_b=%s mu_q=%s fb_objective=0 z_task_frac=0 actor_z_task_frac=0 '
-          'sigma_report=1 model_dir=models/cheetah_eps/%s' % (PRE2, R.B0, mu_b, mu_q, name))
+          'alpha=0 sigma_report=1 model_dir=models/cheetah_eps/%s' % (PRE2, R.B0, mu_b, mu_q, name))
     return [s1, R.stage2('models/cheetah_eps/%s/fb_stage_1_vel10.pickle' % name, name, extra + ' ').replace('models/cheetah_multi/', 'models/cheetah_ft/')]
 
 

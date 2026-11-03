@@ -20,7 +20,7 @@ PRE=models/2026-10-29_14-44-51_FBpretrain-walker/fb_agent_latest.pickle
 TASKS=stand,run,flip,supine,jump_any,kick_l,split,flamingo_r
 mkdir -p logs
 for d in E F; do
-    CMD="python fb_continual_temp.py env_name=walker checkpoint=$PRE eval_ckpt=models/multi/r2_row4_s2/fb_multi.pickle tasks=$TASKS bench=final n_labeled=100000 num_evals=2 eval_labels=run,stand diag=$d diag_seed=7770304"
+    CMD="python ${SCRIPT:-fb_continual_temp.py} env_name=walker checkpoint=$PRE eval_ckpt=models/multi/r2_row4_s2/fb_multi.pickle tasks=$TASKS bench=final n_labeled=100000 num_evals=2 eval_labels=run,stand diag=$d diag_seed=7770304"
     echo "Running: $CMD"
     $CMD
 done

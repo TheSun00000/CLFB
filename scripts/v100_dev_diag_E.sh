@@ -23,7 +23,7 @@ mkdir -p logs
 RUNS=("models/multi/r1_nofb_uni_run_p25/fb_multi.pickle 7375394" "models/multi/r2_row4_s2/fb_multi.pickle 7770304" "models/multi/r2_row4_s3/fb_multi.pickle 6547665")
 for r in "${RUNS[@]}"; do
     set -- $r
-    CMD="python fb_continual_temp.py env_name=walker checkpoint=$PRE eval_ckpt=$1 tasks=$TASKS bench=final n_labeled=100000 num_evals=20 diag=E diag_seed=$2"
+    CMD="python ${SCRIPT:-fb_continual_temp.py} env_name=walker checkpoint=$PRE eval_ckpt=$1 tasks=$TASKS bench=final n_labeled=100000 num_evals=20 diag=E diag_seed=$2"
     echo "Running: $CMD"
     $CMD
 done

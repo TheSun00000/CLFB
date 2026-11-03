@@ -23,6 +23,12 @@ if __name__ == '__main__':
             for k, ts in enumerate((TASKS6[:3], TASKS6[3:])):
                 cmd = ' & '.join('python offline_rl_approx.py env_name=cheetah task=%s reward_approx=true num_evals=20 seed=%d' % (t, seed) for t in ts) + ' & wait'
                 add('c1_td3_s%d_%d' % (seed, k), 'Cheetah: offline TD3 on the true reward, 1M updates, seed %d: %s (3 runs in parallel)' % (seed, ', '.join(ts)), [cmd])
+    if w == 'td3b':
+        # upper bounds for the cheetah main table (2026-11-03): vel10Back, vel10, jump, kick_b, spread; offline TD3 on the true reward, 1M updates, 2 seeds, 3 runs in parallel per job
+        for seed in (1, 2):
+            for k, ts in enumerate((['vel10Back', 'vel10', 'jump'], ['kick_b', 'spread'])):
+                cmd = ' & '.join('python offline_rl_approx.py env_name=cheetah task=%s reward_approx=true num_evals=20 seed=%d' % (t, seed) for t in ts) + ' & wait'
+                add('c3_td3_s%d_%d' % (seed, k), 'Cheetah upper bounds: offline TD3 on the true reward, 1M updates, seed %d: %s (parallel)' % (seed, ', '.join(ts)), [cmd])
     if w == 'c2':
         # round 1: one-task fine-tuning of the pretrained cheetah B, eps only (30k updates), the walker setup (tools/queue_eps.py BASE): control, mu_q 0.5, mu_b 100 + mu_q 0.5, mu_b 300 + mu_q 0.5.
         # 6 tasks x 2 seeds = 12 runs per job (about 7 min each), one job per setting.

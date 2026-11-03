@@ -50,3 +50,21 @@ if __name__ == '__main__' and sys.argv[1] == 'r2':
     for k, lst in Q3.items():
         add('ft2_' + k, 'Cheetah finetune vel10 (new pretrained model) round 2, B stage + F/actor: ' + ', '.join(n for n, *_ in lst),
             sum([pipe(n, mb, mq, e) for n, mb, mq, e in lst], []))
+
+
+def pipe2(name, s1extra, extra):
+    c = pipe(name, 300, 0.5, extra)
+    c[0] = c[0].replace(' sigma_report=1', ' ' + s1extra + ' sigma_report=1') if s1extra else c[0]
+    return c
+
+
+if __name__ == '__main__' and sys.argv[1] == 'r3':
+    # retention on (user 2026-11-03): gentler / different B stages, bc_coef 0 always, stage 2 p = 0.5 or 0.75, 1 seed
+    S = {'lr1': 'lr_coef=1', 'lr03': 'lr_coef=0.3', 'st10k': 'steps_per_stage=10000', 'st3k': 'steps_per_stage=3000',
+         'mb1000q2': 'mu_b=1000 mu_q=2', 'lam30': 'lam=30', 'lam300': 'lam=300', 'weak': 'mu_b=100 mu_q=0.1'}
+    for k, (tag, s1) in enumerate(S.items()):
+        cmds = []
+        for p in ('0.5', '0.75'):
+            n = 'ft3_%s_p%s' % (tag, p.replace('0.', ''))
+            cmds += pipe2(n, s1, 'multi_task_frac=%s' % p)
+        add('ft3_%d' % k, 'Cheetah finetune vel10 with retention, B stage variant %s (mu_b 300, mu_q 0.5 unless changed), F/actor p 0.5 and 0.75, bc 0' % tag, cmds)

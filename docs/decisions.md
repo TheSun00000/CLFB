@@ -88,3 +88,7 @@ Why: B retention restores eps and the actor fix restores supine, but split stays
 
 ## 2026-11-03: alpha = 0 from now on (cheetah)
 User: no `alpha` (atom weight in nu). New B-stage jobs of `tools/queue_cheetah_ft.py` pass `alpha=0` explicitly (nu = uniform sphere only). All cheetah finetune runs up to and including round 5 (ft1-ft5, c4/c5) ran with the script default alpha = 0.5 (not 0.99, which only the walker stream chains used). Nothing was cancelled; the user will say what to do when the running jobs finish.
+
+## 2026-11-03: back to walker, cleaner experiments
+- Decision (user): stop cheetah for now. Walker one-task first: stage 1 keeps lam and mu_b only (L_FB off, ortho_coef 100, rec_fixed_w 1, rec_bs 4096, alpha dropped = 0); stage 2 without atoms, mu_q kept but 0 (R^Q in stage 2 not implemented yet). Confirmed fixed flags: stage 1 fb_objective=0 ortho_coef=100 lam=100 rec_fixed_w=1 rec_bs=4096 lr_coef=3 b_cosine=1 steps_per_stage=30000 z_task_frac=0 actor_z_task_frac=0 est_same=1 ridge=0 n_labeled=100000 tasks=run; stage 2 finetune=multi steps_per_stage=300000 z_task_spread=0 multi_task_frac=0.25 lr_coef=1 bc_coef=0. Stream table differs by: 8 stages, alpha 0.99, stage 2 200k updates, num_evals 10 (alpha 0 untested there).
+- Cheetah p sweep (see journal): best compromise p 0.5-0.75 with retention.

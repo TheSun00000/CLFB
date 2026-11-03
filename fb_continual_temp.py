@@ -94,6 +94,10 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
                             (uniform sphere, mix_ratio of them B(s) of shuffled states; no knowledge of any other task): retention of F and the actor
     multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
+    b_adapter=0             finetune=multi: 1 = F and the actor of the stage are the PRETRAINED nets (adapter_ckpt=<pretrained pickle>) seen through the linear map
+                            W = E[B0 B1^T] Sigma_1^-1 (B0 pretrained, B1 = B of checkpoint=, n states adapter_n=200000): pi'(s,z) = pi(s, sqrt(d) normalize(W z)),
+                            F'(s,a,z) = W^T F(s, a, sqrt(d) normalize(W z)) (so that F'^T z = F^T (W z)). W is a frozen parameter 'adapter_W' of both nets
+                            (identity when absent from a pickle). The F / actor stored in checkpoint= are discarded; everything else of the stage is unchanged.
     finetune=multi          B frozen (checkpoint=any stage pickle). ONE stage of steps_per_stage updates where F (Q loss only, reward B(s')^T Sigma^-1 z,
                             Sigma on n_big states; L_FB / ortho / L_rec / R^B / R^Q are not computed at all) and the actor (TD3) are trained on
                             z = latent of a random task of tasks= (fresh readout with the checkpoint's B, spread z_task_spread) with prob multi_task_frac
@@ -834,8 +838,13 @@ if __name__ == '__main__':
         z_dim:       int
         add_trunk:   bool = False
 
+        adapter:     bool = False     # b_adapter: F'(s,a,z) = W^T F(s,a, sqrt(d) normalize(W z)), W = frozen parameter 'adapter_W' (identity until set)
+
         @nn.compact
         def __call__(self, obs, z, action):
+            if self.adapter:
+                W = jax.lax.stop_gradient(self.param('adapter_W', lambda key, shape: jnp.eye(shape[0]), (self.z_dim, self.z_dim)))
+                z = math.sqrt(self.z_dim) * normalize(z @ W.T)
             # obs_action_net: Linear -> ntanh -> Linear -> relu
             oa = TorchDense(self.hidden_dim)(jnp.concatenate([obs, action], axis=-1))
             oa = NTanh()(oa)
@@ -853,7 +862,10 @@ if __name__ == '__main__':
                 x = nn.relu(TorchDense(self.hidden_dim)(h))
                 return TorchDense(self.z_dim)(x)
 
-            return head(h), head(h)
+            F1, F2 = head(h), head(h)
+            if self.adapter:       # Q = F'^T z = F^T (W z): the output goes back to the coordinates of the new B
+                return F1 @ W, F2 @ W
+            return F1, F2
 
     class BackwardMap(nn.Module):
         """torch BackwardMap: mlp(obs, hidden, 'ntanh', hidden, 'relu', z_dim), then sqrt(z_dim) * normalize."""
@@ -876,9 +888,14 @@ if __name__ == '__main__':
         feature_dim: int
         action_dim:  int
         add_trunk:   bool = False
+        adapter:     bool = False     # b_adapter: pi'(s,z) = pi(s, sqrt(d) normalize(W z)), W = frozen parameter 'adapter_W'
+        z_dim:       int  = 50
 
         @nn.compact
         def __call__(self, obs, z):
+            if self.adapter:
+                W = jax.lax.stop_gradient(self.param('adapter_W', lambda key, shape: jnp.eye(shape[0]), (self.z_dim, self.z_dim)))
+                z = math.sqrt(self.z_dim) * normalize(z @ W.T)
             o = NTanh()(TorchDense(self.hidden_dim)(obs))
             o = nn.relu(TorchDense(self.feature_dim)(o))
             oz = NTanh()(TorchDense(self.hidden_dim)(jnp.concatenate([obs, z], axis=-1)))
@@ -952,6 +969,7 @@ if __name__ == '__main__':
         kd_actor:            float = 0.0      # finetune=multi: weight of ||pi(s,z) - pi_start(s,z)||^2 on generic latents (sphere / B(s))
         kd_q:                float = 0.0      # finetune=multi: weight of the match of Q(s,a,z) = F(s,a,z)^T z to the starting F on generic latents
         multi_task_frac:     float = 0.5      # finetune=multi: fraction of the z that are (noisy) latents of the tasks, the rest is uniform on the sphere
+        b_adapter:           bool  = False    # finetune=multi: F and the actor are the PRETRAINED nets seen through W = E[B0 B1^T] Sigma_1^-1 (needs adapter_ckpt=), see the docstring
 
     class FBTrainingState(flax.struct.PyTreeNode):
         fb_params:             Any          # {'forward': ..., 'backward': ...}
@@ -984,9 +1002,9 @@ if __name__ == '__main__':
             self.obs_dim    = obs_dim
             self.action_dim = action_dim
 
-            self.forward_net  = ForwardMap(config.hidden_dim, config.feature_dim, config.z_dim, config.add_trunk)
+            self.forward_net  = ForwardMap(config.hidden_dim, config.feature_dim, config.z_dim, config.add_trunk, config.b_adapter)
             self.backward_net = BackwardMap(config.backward_hidden_dim, config.z_dim, config.norm_z)
-            self.actor_net    = Actor(config.hidden_dim, config.feature_dim, action_dim, config.add_trunk)
+            self.actor_net    = Actor(config.hidden_dim, config.feature_dim, action_dim, config.add_trunk, config.b_adapter, config.z_dim)
 
             # Forward net at lr, backward net at lr_coef * lr (same as the two torch param groups)
             labels = {'forward': 'forward', 'backward': 'backward'}
@@ -1429,6 +1447,8 @@ if __name__ == '__main__':
         fb_config = dataclasses.replace(fb_config, freeze_b=bool(int(kwargs['freeze_b'])))
     if 'freeze_fb' in kwargs:
         fb_config = dataclasses.replace(fb_config, freeze_fb=bool(int(kwargs['freeze_fb'])))
+    if 'b_adapter' in kwargs:
+        fb_config = dataclasses.replace(fb_config, b_adapter=bool(int(kwargs['b_adapter'])))
     if 'multi_freeze_f' in kwargs:
         fb_config = dataclasses.replace(fb_config, multi_freeze_f=bool(int(kwargs['multi_freeze_f'])))
     if 'multi_white' in kwargs:
@@ -1491,8 +1511,14 @@ if __name__ == '__main__':
             jax.tree_util.tree_map(_check, template, restored)
             return restored
 
-        fb_params    = restore(ts.fb_params, ckpt['fb_params'], 'fb_params')
-        actor_params = restore(ts.actor_params, ckpt['actor_params'], 'actor_params')
+        def with_adapter(template, state):      # b_adapter=1: pickles written without the frozen matrix get the identity
+            if isinstance(template, dict) and 'adapter_W' in template and 'adapter_W' not in state:
+                state = dict(state, adapter_W=np.asarray(template['adapter_W']))
+            return state
+        ckpt_fb = dict(ckpt['fb_params'], forward=with_adapter(ts.fb_params['forward'], ckpt['fb_params']['forward']))
+        ckpt_actor = with_adapter(ts.actor_params, ckpt['actor_params'])
+        fb_params    = restore(ts.fb_params, ckpt_fb, 'fb_params')
+        actor_params = restore(ts.actor_params, ckpt_actor, 'actor_params')
         return ts.replace(
             fb_params=fb_params,
             fb_target_params=jax.tree_util.tree_map(jnp.copy, fb_params),
@@ -1856,6 +1882,30 @@ if __name__ == '__main__':
         print(f'eval-only: {EVAL_CKPT} ({len(lat)} stored latents)')
         run_eval(train_state, 0, 0, 'eval_only', lat, m2e)
         sys.exit(0)
+
+    if fb_config.b_adapter:    # F and the actor = the PRETRAINED nets seen through W = E[B0 B1^T] Sigma_1^-1; B = the B of the checkpoint (stage 1)
+        assert FINETUNE == 'multi' and 'adapter_ckpt' in kwargs, "b_adapter=1 needs finetune=multi and adapter_ckpt=<pretrained pickle>"
+        ts_pre = load_checkpoint(train_state, str(kwargs['adapter_ckpt']))                 # F0, pi0, B0
+        n_ad = int(kwargs['adapter_n']) if 'adapter_n' in kwargs else 200_000
+        obs_ad = replay_buffer.obs[replay_buffer.sample_indices(next_stage_key(), n_ad)]
+        B0a = np.asarray(big_backward(ts_pre.fb_params['backward'], obs_ad), dtype=np.float64)
+        B1a = np.asarray(big_backward(train_state.fb_params['backward'], obs_ad), dtype=np.float64)
+        S1a = B1a.T @ B1a / n_ad
+        W_np = (B0a.T @ B1a / n_ad) @ np.linalg.inv(S1a)                                  # B0 ~ W B1 (least squares)
+        sv = np.linalg.svd(W_np, compute_uv=False)
+        resid = float(np.linalg.norm(B0a - B1a @ W_np.T) / np.linalg.norm(B0a))
+        msg = (f'b_adapter: W = E[B0 B1^T] Sigma1^-1 on {n_ad} states; singular values min {sv.min():.4f} median {np.median(sv):.4f} max {sv.max():.4f} '
+               f'(cond {sv.max() / sv.min():.1f}); relative residual ||B0 - B1 W^T|| / ||B0|| = {resid:.4f}; F, actor <- {kwargs["adapter_ckpt"]}, B <- {CHECKPOINT}')
+        print(msg)
+        with open(f'{LOGS_FOLDER}/info.txt', 'a') as file:
+            file.write(msg + '\n')
+        W_ad = jnp.asarray(W_np, dtype=jnp.float32)
+        fwd_ad = dict(ts_pre.fb_params['forward'], adapter_W=W_ad)
+        act_ad = dict(ts_pre.actor_params, adapter_W=W_ad)
+        fb_ad = {'forward': fwd_ad, 'backward': train_state.fb_params['backward']}
+        train_state = train_state.replace(
+            fb_params=fb_ad, fb_target_params=jax.tree_util.tree_map(jnp.copy, fb_ad), actor_params=act_ad,
+            fb_optimizer_state=agent.fb_optimizer.init(fb_ad), actor_optimizer_state=agent.actor_optimizer.init(act_ad))
 
     latents, m2s = [], []      # stored z_j (d numbers per task) and m2_j (evaluation only)
 

@@ -7,6 +7,7 @@ Same envs / datasets / eval as fb.py, but ONE reward function per env instead of
 
 Usage:
     python offline_rl_approx.py env_name=walker task=walk
+    cross evaluation of saved policies: python offline_rl_approx.py env_name=walker eval_ckpt=models/<run>/td3_agent_latest.pickle,... num_evals=20
     optional: task=<label or index in the benchmark list of the env>   (default: 0, the available labels are printed)
               seed=<int> (default: random, logged in info.txt) discount=0.95
               bc_coef=0.0     (0 -> plain TD3 actor loss -Q.mean(); > 0 -> TD3+BC)
@@ -1215,6 +1216,26 @@ if __name__ == '__main__':
         state_dict = serialization.to_state_dict(jax.device_get(state))
         with open(path, "wb") as params_file:
             pickle.dump(state_dict, params_file)
+
+    # ── Cross evaluation (no training): eval_ckpt=a.pickle,b.pickle ───────────────
+    # Each saved TD3 policy is rolled out NUM_EVALS episodes (the same trajectories are scored by the reward of EVERY task of the benchmark list).
+    # Writes cross_eval.csv: one row per policy, columns <task>_mean / <task>_std (return over EVAL_STEPS steps).
+    if 'eval_ckpt' in kwargs:
+        _cks = [c for c in str(kwargs['eval_ckpt']).split(',') if c]
+        _fields = ['policy'] + [f'{l}_{k}' for l in TASK_LABELS for k in ('mean', 'std')]
+        cross_logger = CSVLogger(filepath=f"{LOGS_FOLDER}/cross_eval.csv", fieldnames=_fields)
+        for _ck in _cks:
+            with open(_ck, 'rb') as f:
+                _sd = pickle.load(f)
+            _actor = jax.tree_util.tree_map(jnp.asarray, serialization.from_state_dict(train_state.actor_params, _sd['actor_params']))
+            _, _aux, _ = rollout_batch(_actor, NUM_EVALS)
+            _row = {'policy': os.path.basename(os.path.dirname(_ck)).split(f'TD3-{ENV_NAME}-')[-1]}
+            for _fn, _lab, _par in benchmarks:
+                _r = np.asarray(_fn(jnp.asarray(_aux, dtype=jnp.float32), _par)).sum(axis=-1)
+                _row[f'{_lab}_mean'] = float(_r.mean()); _row[f'{_lab}_std'] = float(_r.std(ddof=1))
+            cross_logger.log(_row)
+            print(_row['policy'], {l: round(_row[f'{l}_mean'], 1) for l in TASK_LABELS}, flush=True)
+        sys.exit(0)
 
     # ── Training ──────────────────────────────────────────────────────────────────
 

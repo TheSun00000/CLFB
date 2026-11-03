@@ -80,3 +80,15 @@ if __name__ == '__main__' and sys.argv[1] == 'r4':
                        ('lr03st10k', 'lr_coef=0.3 steps_per_stage=10000', '0.75'), ('lr03', 'lr_coef=0.3', '1')):
         n = 'ft4_%s_p%s_s1' % (tag, p.replace('0.', ''))
         add(n, 'Cheetah finetune vel10 with retention: B stage %s, F/actor p %s' % (tag, p), pipe2(n, s1, 'multi_task_frac=' + p))
+
+
+if __name__ == '__main__' and sys.argv[1] == 'r5':
+    # clean p sweep with retention (standard row 4 B stage), same seed => same B for every p; bc_coef 0
+    for s in (1, 2, 3):
+        for part, ps in (('a', ('0.1', '0.25', '0.5')), ('b', ('0.75', '0.9', '1'))):
+            cmds = []
+            for p in ps:
+                n = 'ft5_s%d_p%s' % (s, p.replace('0.', ''))
+                c = pipe(n, 300, 0.5, 'multi_task_frac=%s' % p)
+                cmds += [x.replace(' model_dir=', ' seed=%d model_dir=' % (100 + s)) for x in c]
+            add('ft5_s%d%s' % (s, part), 'Cheetah finetune vel10 p sweep with retention (row 4 B stage, seed %d): p = %s' % (100 + s, ', '.join(ps)), cmds)

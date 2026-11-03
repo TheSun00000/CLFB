@@ -11,6 +11,7 @@ for d in sorted(glob.glob('logs/*FBfinetune-multi*')):
     if flt not in name: continue
     try: rows = list(csv.DictReader(open(d + '/eval_log.csv')))
     except Exception: continue
+    if not rows: continue
     ts = [k[:-11] for k in rows[0] if k.endswith('_fresh_mean') and any(r.get(k) for r in rows)]       # every task evaluated (training tasks or not)
     steps = [r['step'] for r in rows]
     out = []

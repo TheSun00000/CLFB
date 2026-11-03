@@ -6,7 +6,7 @@ A run still going (last step < 300000) is skipped."""
 import json, re, sys, statistics as st
 rows = json.load(open(sys.argv[1]))
 MIN = int(sys.argv[2]) if len(sys.argv) > 2 else 300000       # a run is complete when its last step reaches MIN (stream chains: 200000)
-KEY = {'stand': 'stand', 'run': 'run', 'flip': 'flip', 'supine': 'supine', 'jump_a': 'jump_any', 'kick_l': 'kick_l', 'split': 'split', 'flamin': 'flamingo_r', 'vel10B': 'vel10Back', 'vel10': 'vel10', 'kick_b': 'kick_b', 'spread': 'spread'}
+KEY = {'stand': 'stand', 'run': 'run', 'flip': 'flip', 'supine': 'supine', 'jump_a': 'jump_any', 'kick_l': 'kick_l', 'split': 'split', 'flamin': 'flamingo_r', 'jump': 'jump', 'vel10B': 'vel10Back', 'vel10': 'vel10', 'kick_b': 'kick_b', 'spread': 'spread'}
 runs = {}
 for line in sys.stdin:
     m = re.match(r'(\S+)\s+last step (\d+) \|(.*)', line)

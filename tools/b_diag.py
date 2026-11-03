@@ -58,9 +58,11 @@ def subspace_summary(G0, G1):
     sin2 = np.sin(np.radians(ang)) ** 2
     order = np.argsort(-ang)
     Q = U @ Vt
+    Up, _, Vpt = np.linalg.svd(C)
+    Q_plain = Up @ Vpt                                              # polar factor of the UNwhitened E[B1 B0^T]: the alignment that keeps ||B|| = sqrt d
     P = Vt.T @ np.diag(s) @ Vt
     eig_ang = np.sort(np.abs(np.degrees(np.angle(np.linalg.eigvals(Q)))))[::-1]
-    out = dict(S0=S0, S1=S1, C=C, W0=W0, W1=W1, At=At, U=U, s=s, Vt=Vt, ang=ang, Q=Q, P=P, eig_ang=eig_ang,
+    out = dict(S0=S0, S1=S1, C=C, W0=W0, W1=W1, At=At, U=U, s=s, Vt=Vt, ang=ang, Q=Q, Q_plain=Q_plain, P=P, eig_ang=eig_ang,
                n5=int((ang > 5).sum()), n10=int((ang > 10).sum()), n30=int((ang > 30).sum()),
                RB=float(1 - np.mean(s ** 2)), Q_minus_I=float(np.linalg.norm(Q - np.eye(d))), P_minus_I=float(np.linalg.norm(P - np.eye(d))),
                top1=float(sin2[order[:1]].sum() / sin2.sum()), top3=float(sin2[order[:3]].sum() / sin2.sum()), top5=float(sin2[order[:5]].sum() / sin2.sum()))
@@ -94,6 +96,7 @@ def analyse_task_latents(F0, F1, lab, rho, held, R, tasks, sub, Dk0=None, Dk1=No
         load = float(np.sum((Vlow @ zw0) ** 2) / np.sum(zw0 ** 2)) if low.any() else 0.0
         tz = T @ z0
         rows.append(dict(task=k, cos_plain=cosine(z0, z1), cos_whitened=cosine(zw0, zw1), cos_procrustes=cosine(zw0, sub['Q'].T @ zw1),
+                         cos_procrustes_plain=cosine(z0, sub['Q_plain'].T @ z1),
                          angle_whitened=float(np.degrees(np.arccos(np.clip(cosine(zw0, zw1), -1, 1)))),
                          angle_procrustes=float(np.degrees(np.arccos(np.clip(cosine(zw0, sub['Q'].T @ zw1), -1, 1)))),
                          cos_tracked=cosine(tz, z1), relerr_tracked=float(np.linalg.norm(tz - z1) / np.linalg.norm(z1)),
@@ -250,8 +253,8 @@ def main():
         off = ~np.eye(len(a.tasks), dtype=bool)
         print('[%s] inter-task cos (plain, off-diagonal mean): pre %.3f new %.3f' % (name, M0[off].mean(), M1[off].mean()), flush=True)
         for r in rows:
-            print('[%s] %-11s cos plain %.3f whitened %.3f procrustes %.3f | tracked cos %.3f relerr %.3f | load on changed dirs %.3f' %
-                  (name, r['task'], r['cos_plain'], r['cos_whitened'], r['cos_procrustes'], r['cos_tracked'], r['relerr_tracked'], r['load_changed']), flush=True)
+            print('[%s] %-11s cos plain %.3f whitened %.3f procrustes(whitened) %.3f procrustes(plain) %.3f | tracked cos %.3f relerr %.3f | load on changed dirs %.3f' %
+                  (name, r['task'], r['cos_plain'], r['cos_whitened'], r['cos_procrustes'], r['cos_procrustes_plain'], r['cos_tracked'], r['relerr_tracked'], r['load_changed']), flush=True)
         for r in fit_rows:
             print('[%s] %-11s eps pre %.3f new %.3f | with intercept pre %.3f new %.3f | readout from D_k: pre %.3f new %.3f, error on D_k itself pre %.3f new %.3f' %
                   (name, r['task'], r['eps_pre'], r['eps_new'], r['eps_pre_int'], r['eps_new_int'], r['eps_pre_Dk'], r['eps_new_Dk'], r['fit_on_Dk_pre'], r['fit_on_Dk_new']), flush=True)

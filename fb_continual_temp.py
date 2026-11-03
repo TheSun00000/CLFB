@@ -13,8 +13,10 @@ no new flag this script behaves like fb_continual.py. New flags, all about the L
                          fb_params and actor_params, e.g. the pretrained one), evaluates ALL the benchmark tasks of the env zero-shot (latent from fresh labels,
                          num_evals episodes each) and the stored latents of the stream tasks (tracked), writes eval_log.csv (tag eval_only) and exits.
                          The log folder is logs/<time>_FBeval-<env>-<tasks>; info.txt holds the source checkpoint. tasks= should be the stream the checkpoint was trained on.
+    diag=E|F          (with eval_ckpt=<theta_1>, checkpoint=<theta_0>, diag_seed=<seed of the run>) diagnostics of _utils/diag_ef.py: E = zero-shot returns of
+                         theta_0 / theta_1 with the latents of the other / aligned / rotated / bootstrapped, F = FB loss of the (F, pi, B) combinations, value accuracy.
     model_dir=<path>  where the stage checkpoints are written (default models/<run folder>); a fixed path lets a later command of the same job evaluate it
-    bench=all         final: (walker) the benchmark list is the task list of the study: stand run flip supine jump_any kick_l split flamingo_r
+    bench=all        final: (walker) the benchmark list is the task list of the study: stand run flip supine jump_any kick_l split flamingo_r
     eval_z=fresh      random: (eval-only control) the latent of every episode is a random vector on the sphere instead of the one inferred from fresh labels
     eval_labels=a,b   the fresh evaluation covers only these benchmark tasks (eval-only mode: the new walker tasks without re-evaluating the built-ins)
     eval_stream_only=0  1: the fresh zero-shot evaluation (rollouts and reward-reconstruction stats) covers only the tasks of the stream, not
@@ -1831,6 +1833,17 @@ if __name__ == '__main__':
             pickle.dump(state_dict, params_file)
 
     # ── Continual training ────────────────────────────────────────────────────────
+
+    if 'diag' in kwargs:       # diagnostics E / F of eval_ckpt (theta_1) against checkpoint (theta_0), see _utils/diag_ef.py
+        assert EVAL_CKPT, "diag= needs eval_ckpt= (theta_1)"
+        import _utils.diag_ef as diag_ef
+        diag_ef.run(str(kwargs['diag']), dict(
+            Z_DIM=Z_DIM, diag_seed=int(kwargs['diag_seed']), replay_buffer=replay_buffer, N_LABELED=N_LABELED, ts0=train_state,
+            ts1=load_checkpoint(train_state, EVAL_CKPT), LOGS_FOLDER=LOGS_FOLDER, big_backward=big_backward, benchmarks=benchmarks,
+            EVAL_BENCH=EVAL_BENCH, LABELS=LABELS, NUM_EVALS=NUM_EVALS, EVAL_N=EVAL_N, encode_reward=encode_reward, rollout_returns=rollout_returns,
+            agent=agent, DISCOUNT=fb_config.discount, EVAL_STEPS=EVAL_STEPS, eval_envs=eval_envs, make_eval_env=make_eval_env,
+            env_reset=env_reset, env_step=env_step, env_aux=env_aux, CHECKPOINT=CHECKPOINT, EVAL_CKPT=EVAL_CKPT))
+        sys.exit(0)
 
     if EVAL_CKPT:              # eval-only mode: every benchmark task, then exit
         train_state = load_checkpoint(train_state, EVAL_CKPT)

@@ -68,3 +68,15 @@ if __name__ == '__main__' and sys.argv[1] == 'r3':
             n = 'ft3_%s_p%s' % (tag, p.replace('0.', ''))
             cmds += pipe2(n, s1, 'multi_task_frac=%s' % p)
         add('ft3_%d' % k, 'Cheetah finetune vel10 with retention, B stage variant %s (mu_b 300, mu_q 0.5 unless changed), F/actor p 0.5 and 0.75, bc 0' % tag, cmds)
+
+
+if __name__ == '__main__' and sys.argv[1] == 'r4':
+    # round 4: 3 seeds of the two best retention configs of round 3 + new combinations (1 seed); bc_coef 0
+    for tag, s1, p in (('lr03', 'lr_coef=0.3', '0.75'), ('weak', 'mu_b=100 mu_q=0.1', '0.75')):
+        for s in (1, 2, 3):
+            n = 'ft4_%s_p%s_s%d' % (tag, p.replace('0.', ''), s)
+            add(n, 'Cheetah finetune vel10 with retention, 3 seeds: B stage %s, F/actor p %s, seed %d' % (tag, p, s), pipe2(n, s1, 'multi_task_frac=' + p))
+    for tag, s1, p in (('lr01', 'lr_coef=0.1', '0.75'), ('lr03weak', 'lr_coef=0.3 mu_b=100 mu_q=0.1', '0.75'),
+                       ('lr03st10k', 'lr_coef=0.3 steps_per_stage=10000', '0.75'), ('lr03', 'lr_coef=0.3', '1')):
+        n = 'ft4_%s_p%s_s1' % (tag, p.replace('0.', ''))
+        add(n, 'Cheetah finetune vel10 with retention: B stage %s, F/actor p %s' % (tag, p), pipe2(n, s1, 'multi_task_frac=' + p))

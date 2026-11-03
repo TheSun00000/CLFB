@@ -47,6 +47,10 @@ echo "Running: $CMD"
 mkdir -p models logs
 """
 
+# Eval-only jobs (no training) go to the V100 dev partition, which is easy to get (user, 2026-11-03): --gpu v100, or automatic when every command has eval_ckpt=.
+HEADER_V100 = (HEADER.replace('--cpus-per-task=8', '--cpus-per-task=16').replace('--account=vcj@a100', '--account=vcj@v100')
+               .replace('#SBATCH -C a100\n', '').replace('--qos=qos_gpu_a100-dev', '--qos=qos_gpu-dev'))
+
 
 def lock():
     """One queue.py that changes the queue at a time (the systemd timer and an interactive call must not submit twice): the second one just stops."""
@@ -106,7 +110,8 @@ def add(a):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     joined = '; '.join(a.cmd).replace('"', '\\"')
     with open(path, 'w') as f:
-        f.write(HEADER.format(time=a.time, joined=joined))
+        gpu = a.gpu or ('v100' if all('eval_ckpt=' in c for c in a.cmd) else 'a100')
+        f.write((HEADER_V100 if gpu == 'v100' else HEADER).format(time=a.time, joined=joined))
         for c in a.cmd:
             f.write(c + '\n')
     q['entries'].append({'name': a.name, 'title': a.title or a.name, 'script': 'scripts/queue/%s.sh' % a.name, 'slots': a.slots, 'state': 'queued', 'job_id': None, 'added': datetime.now().isoformat(timespec='seconds')})
@@ -220,7 +225,7 @@ def main():
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest='cmd', required=True)
     p = sp.add_parser('add'); p.add_argument('name'); p.add_argument('--time', default='1:00:00'); p.add_argument('--cmd', action='append', required=True)
-    p.add_argument('--title', default=''); p.add_argument('--slots', type=int, default=1); p.set_defaults(f=add)
+    p.add_argument('--title', default=''); p.add_argument('--slots', type=int, default=1); p.add_argument('--gpu', choices=['a100', 'v100'], default=''); p.set_defaults(f=add)
     sp.add_parser('status').set_defaults(f=status)
     sp.add_parser('sync').set_defaults(f=sync)
     p = sp.add_parser('submit'); p.add_argument('--dry-run', action='store_true'); p.add_argument('--notify', action='store_true', help='desktop notification when something is submitted'); p.set_defaults(f=submit)

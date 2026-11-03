@@ -39,7 +39,7 @@ if __name__ == '__main__':
         [stage2(PRE, 'cr_row2_s%d' % k) for k in (1, 2, 3)])
     for k in (1, 2, 3):
         add('cr_row3_s%d' % k, 'Main table row 3 (seed %d): B stage without retention (L_FB off, uniform z, ortho 100, mu_b 0, mu_q 0, 30k) then F + actor p = 0.25 (300k)' % k,
-            [stage1('cr_row3_s%d' % k, 0, 0), stage2('models/cheetah_eps/cr_row3_s%d/fb_stage_1_run.pickle' % k, 'cr_row3_s%d' % k)])
+            [stage1('cr_row3_s%d' % k, 0, 0), stage2('models/cheetah_eps/cr_row3_s%d/fb_stage_1_vel10.pickle' % k, 'cr_row3_s%d' % k)])
     for k in (1, 2, 3):
         add('cr_row4_s%d' % k, 'Main table row 4 (seed %d): B stage with retention (L_FB off, uniform z, ortho 100, mu_b 300, mu_q 0.5, 30k) then F + actor p = 0.25 (300k)' % k,
-            [stage1('cr_row4_s%d' % k, 300, 0.5), stage2('models/cheetah_eps/cr_row4_s%d/fb_stage_1_run.pickle' % k, 'cr_row4_s%d' % k)])
+            [stage1('cr_row4_s%d' % k, 300, 0.5), stage2('models/cheetah_eps/cr_row4_s%d/fb_stage_1_vel10.pickle' % k, 'cr_row4_s%d' % k)])

@@ -16,7 +16,7 @@ for d in sorted(glob.glob('logs/*FBfinetune-multi*')):
     out = []
     for t in ts:
         v = [float(r[t + '_fresh_mean']) for r in rows if r.get(t + '_fresh_mean')]
-        if len(v) < 2: continue
+        if len(v) < 1: continue
         l3 = sum(v[-3:]) / len(v[-3:])
-        out.append('%s %d>%d(%d) /%d' % (t[:6], v[0], v[-1], l3, UB[t]))
+        out.append('%s %d>%d(%d) /%d' % (t[:6], v[0], v[-1], l3, UB.get(t, 0)))
     print('%-26s last step %s | ' % (name, steps[-1]) + ' | '.join(out))

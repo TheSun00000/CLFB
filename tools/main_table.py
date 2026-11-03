@@ -5,7 +5,8 @@ rows.json: {"<row n>": ["run name", ...]}.  Cell = mean +- std over the runs of 
 A run still going (last step < 300000) is skipped."""
 import json, re, sys, statistics as st
 rows = json.load(open(sys.argv[1]))
-KEY = {'stand': 'stand', 'run': 'run', 'flip': 'flip', 'supine': 'supine', 'jump_a': 'jump_any', 'kick_l': 'kick_l', 'split': 'split', 'flamin': 'flamingo_r'}
+MIN = int(sys.argv[2]) if len(sys.argv) > 2 else 300000       # a run is complete when its last step reaches MIN (stream chains: 200000)
+KEY = {'stand': 'stand', 'run': 'run', 'flip': 'flip', 'supine': 'supine', 'jump_a': 'jump_any', 'kick_l': 'kick_l', 'split': 'split', 'flamin': 'flamingo_r', 'vel10B': 'vel10Back', 'vel10': 'vel10', 'kick_b': 'kick_b', 'spread': 'spread'}
 runs = {}
 for line in sys.stdin:
     m = re.match(r'(\S+)\s+last step (\d+) \|(.*)', line)
@@ -14,12 +15,12 @@ for line in sys.stdin:
     vals = {}
     for t in rest.split('|'):
         mm = re.match(r'\s*(\w+) (-?\d+)>(-?\d+)\((-?\d+)\)', t)
-        if mm: vals[KEY[mm.group(1)]] = (float(mm.group(2)), float(mm.group(4)))
+        if mm and mm.group(1) in KEY: vals[KEY[mm.group(1)]] = (float(mm.group(2)), float(mm.group(4)))
     runs[name] = (step, vals)
 def cell(vs): return '%d ± %d' % (round(st.mean(vs)), round(st.pstdev(vs))) if len(vs) > 1 else ('%d' % round(vs[0]) if vs else '')
 out = {}
 for n, names in rows.items():
-    ok = [runs[x][1] for x in names if x in runs and runs[x][0] >= 300000]
+    ok = [runs[x][1] for x in names if x in runs and runs[x][0] >= MIN]
     out[n] = {'n_runs': len(ok), 'cells': {k: cell([r[k][1] for r in ok if k in r]) for k in KEY.values()}}
     if n == '0':
         pre = [runs[x][1] for x in names if x in runs]

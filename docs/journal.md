@@ -70,3 +70,7 @@ Tracker: snapshot/jobs and curves pushed, 23 tracking docs + family 'retention' 
 
 ## 2026-11-02 (night 4): main table
 - Queued the main table (see decisions.md): 8 jobs on A100 dev plus the H100 test job 1871918; all pending at the time of writing (QOSGrpCpuLimit / Priority). Overview tab of the tracker has the table (empty cells until the runs finish; fill with ArtifactData update of maintable/single_task, cells[task] = "mean ± std").
+
+## 2026-11-03: stream and cheetah tables
+- Walker stream table done (12 jobs s2_row*): after 8 stages ours keeps supine 986, split 998, flamingo_r 975 and learns stand 936, flip 844, run 370; no retention: supine 666 +- 269, flamingo_r 660; F + actor with B frozen: split 654, flip 605; jump_any / kick_l low for all (57-213). Table in the Overview tab (maintable/stream).
+- Cheetah one-task table (rows 3 and 4): ours above no retention on all test tasks (vel10Back 211 vs 98, spread 402 vs 315) but neither beats the pretrained model on vel10 (330; TD3 bound about 280; ends 180-211). Rows 1 and 2 and the vel10Back TD3 bound pending. Bug fixed on the way: cheetah stage-1 checkpoint is fb_stage_1_vel10.pickle (not _run).

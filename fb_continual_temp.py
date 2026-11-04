@@ -94,6 +94,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
                             (uniform sphere, mix_ratio of them B(s) of shuffled states; no knowledge of any other task): retention of F and the actor
     multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
+    lr_decay_steps=0        cosine decay of the lr of F and of the actor over this many updates (down to 10% of lr); 0 = constant lr (used with finetune=multi)
     eval_dense_until=0 eval_late_every=20   finetune=multi: evaluate every eval_each_steps chunks (1 chunk = 1000 updates) up to eval_dense_until, then every eval_late_every chunks
     b_adapter=0             finetune=multi: 1 = F and the actor of the stage are the PRETRAINED nets (adapter_ckpt=<pretrained pickle>) seen through the linear map
                             W = E[B0 B1^T] Sigma_1^-1 (B0 pretrained, B1 = B of checkpoint=, n states adapter_n=200000): pi'(s,z) = pi(s, sqrt(d) normalize(W z)),
@@ -955,6 +956,7 @@ if __name__ == '__main__':
         rec_fixed_w:         bool  = False    # L_rec with the fixed readout w_fit of the stage instead of the re-solved one
         rec_bs:              int   = 0        # L_rec minibatch size on D_k (0 = the whole labeled set)
         b_decay_steps:       int   = 0        # >0: cosine decay of the lr of B over this many updates (set by b_cosine=1)
+        lr_decay_steps:      int   = 0        # >0: cosine decay of the lr of F and of the actor over this many updates, down to 10% of lr (finetune=multi: fast start, then settle)
         # --- latent of the current task inside the FB / actor loss (0 = off = original behaviour) ---
         z_task_frac:         float = 0.0      # fraction of the z of L_FB and of the actor loss replaced by the latent of the current task
         ztask_bs:            int   = 0        # >0: z_k re-encoded on a minibatch of D_k of this size at every step (0 = the whole set)
@@ -1014,11 +1016,14 @@ if __name__ == '__main__':
             b_lr = config.lr * config.lr_coef
             if config.b_decay_steps > 0:
                 b_lr = optax.cosine_decay_schedule(b_lr, config.b_decay_steps)
+            f_lr = config.lr
+            if config.lr_decay_steps > 0:
+                f_lr = optax.cosine_decay_schedule(config.lr, config.lr_decay_steps, alpha=0.1)
             self.fb_optimizer = optax.multi_transform(
-                {'forward': optax.adam(config.lr), 'backward': optax.adam(b_lr)},
+                {'forward': optax.adam(f_lr), 'backward': optax.adam(b_lr)},
                 lambda params: {k: jax.tree_util.tree_map(lambda _: labels[k], v) for k, v in params.items()},
             )
-            self.actor_optimizer = optax.adam(config.lr)
+            self.actor_optimizer = optax.adam(f_lr)
 
         # ── init ──────────────────────────────────────────────────────────────
 
@@ -1437,7 +1442,7 @@ if __name__ == '__main__':
 
     fb_config = FBConfig(batch_size=BATCH_SIZE)
     for _k, _typ in (('discount', float), ('bc_coef', float), ('ortho_coef', float), ('q_loss_coef', float),
-                     ('lr', float), ('lr_coef', float), ('fb_target_tau', float), ('mix_ratio', float),
+                     ('lr', float), ('lr_coef', float), ('lr_decay_steps', int), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
                      ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('multi_bmix', float), ('multi_randtask', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):

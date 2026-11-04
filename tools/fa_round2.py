@@ -8,4 +8,4 @@ from fa_round1 import submit
 if __name__ == '__main__':
     for lr, f in ((1e-4, 0.25), (3e-4, 0.5), (1e-3, 0.5)):
         cmds = [fc.stage2('run', s, 'r2_lr%g_f%g_%s' % (lr, f, s), lr=lr, frac=f) for s in ('s2', 's3')]
-        submit('fa_r2_lr%g_f%g' % (lr, f), cmds, qos='a100')
+        submit('fa_r2a_lr%g_f%g' % (lr, f), cmds, qos='a100')

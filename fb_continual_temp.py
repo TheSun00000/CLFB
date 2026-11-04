@@ -94,6 +94,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
                             (uniform sphere, mix_ratio of them B(s) of shuffled states; no knowledge of any other task): retention of F and the actor
     multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
+    nu_const=0 nu_spread=0.5   weight of the latent of the constant reward (E[B_old]) in nu (with angular noise nu_spread): natural rewards are mostly aligned with it and the uniform nu hardly protects them
     lr_decay_steps=0        cosine decay of the lr of F and of the actor over this many updates (down to 10% of lr); 0 = constant lr (used with finetune=multi)
     eval_dense_until=0 eval_late_every=20   finetune=multi: evaluate every eval_each_steps chunks (1 chunk = 1000 updates) up to eval_dense_until, then every eval_late_every chunks
     b_adapter=0             finetune=multi: 1 = F and the actor of the stage are the PRETRAINED nets (adapter_ckpt=<pretrained pickle>) seen through the linear map
@@ -949,6 +950,8 @@ if __name__ == '__main__':
         mu_b:                float = 1.0      # weight of R^B
         mu_q:                float = 0.01     # weight of R^Q (not dimensionless: it is a squared error on values)
         alpha:               float = 0.5      # weight of the atoms in nu
+        nu_const:            float = 0.0      # weight of the latent of the constant reward (E[B_old]) in nu, with angular noise nu_spread (natural rewards are mostly aligned with it)
+        nu_spread:           float = 0.5      # angular noise around the constant-reward latent
         n_est:               int   = 4096     # states of D per step to estimate Sigma_theta, A_theta
         est_same:            bool  = False    # Sigma_old re-estimated at every step on the n_est states used for Sigma_theta and A (default: n_big states, once per stage)
         ridge:               float = 1e-5     # ridge on every covariance before inversion
@@ -999,6 +1002,7 @@ if __name__ == '__main__':
         w_q:           jnp.ndarray     # [d] Sigma_old^-1 z_cond: fixed readout of the reward in the fine-tuning Q loss
         old_actor:     Any = None      # finetune=multi: actor at the start (for kd_actor)
         sig_half:      Any = None      # finetune=multi: Sigma^1/2 (for multi_white)
+        z_const:       Any = None      # [d] E_rho[B_old(s)]: latent of the constant reward r = 1 (nu_const)
 
     class FBAgent:
 
@@ -1264,6 +1268,11 @@ if __name__ == '__main__':
                 z_atom   = math.sqrt(d) * normalize(sd.atoms[at_idx])
                 use_atom = (jax.random.uniform(k_nu2, (bs, 1)) < cfg.alpha) & (sd.n_atoms > 0)
                 z_ret    = jax.lax.stop_gradient(jnp.where(use_atom, z_atom, z_sphere))
+                if cfg.nu_const > 0:     # nu <- (1 - nu_const) nu + nu_const * (E[B_old] + noise)
+                    k_c1, k_c2 = jax.random.split(jax.random.fold_in(random_key, 31))
+                    z_cst  = math.sqrt(d) * normalize(normalize(sd.z_const)[None, :] + cfg.nu_spread * normalize(jax.random.normal(k_c1, (bs, d))))
+                    use_c  = jax.random.uniform(k_c2, (bs, 1)) < cfg.nu_const
+                    z_ret  = jax.lax.stop_gradient(jnp.where(use_c, z_cst, z_ret))
 
             off_diag = 1.0 - jnp.eye(bs)
             n_off    = off_diag.sum()
@@ -1442,7 +1451,7 @@ if __name__ == '__main__':
 
     fb_config = FBConfig(batch_size=BATCH_SIZE)
     for _k, _typ in (('discount', float), ('bc_coef', float), ('ortho_coef', float), ('q_loss_coef', float),
-                     ('lr', float), ('lr_coef', float), ('lr_decay_steps', int), ('fb_target_tau', float), ('mix_ratio', float),
+                     ('lr', float), ('lr_coef', float), ('lr_decay_steps', int), ('nu_const', float), ('nu_spread', float), ('fb_target_tau', float), ('mix_ratio', float),
                      ('lam', float), ('mu_b', float), ('mu_q', float),
                      ('alpha', float), ('n_est', int), ('ridge', float),
                      ('multi_task_frac', float), ('kd_actor', float), ('kd_q', float), ('multi_bmix', float), ('multi_randtask', float), ('z_task_frac', float), ('z_task_spread', float), ('actor_z_task_frac', float), ('ztask_bs', int)):
@@ -1644,7 +1653,7 @@ if __name__ == '__main__':
         z_cond = math.sqrt(Z_DIM) * normalize(z_run)
         sd = StageData(old_params=old_params, sigma_old_inv=sigma_old_inv, lab_obs=lab_obs, lab_r=lab_r,
                        atoms=atoms, n_atoms=jnp.asarray(len(latents), dtype=jnp.int32),
-                       z_run=z_run, z_cond=z_cond, w_fit=sigma_old_inv @ z_run, w_q=sigma_old_inv @ z_cond)
+                       z_run=z_run, z_cond=z_cond, w_fit=sigma_old_inv @ z_run, w_q=sigma_old_inv @ z_cond, z_const=B_old_big.mean(axis=0))
 
         # fresh Adam states; target network = copy of theta_old
         ts = ts.replace(

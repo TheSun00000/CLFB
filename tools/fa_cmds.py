@@ -18,11 +18,11 @@ class _S1:
 S1 = _S1()
 
 
-def stage1(task, seed, prefix='fa2', mu_b=300):
+def stage1(task, seed, prefix='fa2', mu_b=300, extra=''):
     """B tuned on `task` as in row 4 (L_rec lam 100, retention mu_b 300, mu_q 0, ortho 100, 30k updates); F and the actor of that stage are discarded by b_adapter."""
     return ('python $SCRIPT env_name=walker checkpoint=%s tasks=%s n_labeled=100000 num_evals=5 steps_per_stage=30000 lam=100 rec_fixed_w=1 rec_bs=4096 lr_coef=3 b_cosine=1 '
             'z_task_spread=0.2 ztask_bs=4096 bench=final eval_each_steps=0 eval_baseline=1 eval_rollouts=0 est_same=1 ridge=0 ortho_coef=100 mu_b=%g mu_q=0 fb_objective=0 '
-            'z_task_frac=0 actor_z_task_frac=0 seed=%d model_dir=%s' % (PRE, task, mu_b, SEED1[(task, seed)], s1dir(task, seed, prefix)))
+            'z_task_frac=0 actor_z_task_frac=0 seed=%d model_dir=%s%s' % (PRE, task, mu_b, SEED1[(task, seed)], s1dir(task, seed, prefix), (' ' + extra) if extra else ''))
 
 
 def stage2(task, seed, tag, lr=1e-4, frac=0.25, adapter=True, steps=200000, every=5, dense_until=50, late_every=20, extra='', s1prefix=None):

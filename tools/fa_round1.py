@@ -20,5 +20,5 @@ if __name__ == '__main__':
     n_jobs = 5
     for j in range(n_jobs):
         mine = runs[j::n_jobs]
-        cmds = [fc.stage2('run', s, 'r1_%s_lr%g_f%g_%s' % ('ad' if ad else 'no', lr, f, s), lr=lr, frac=f, adapter=ad) for (ad, lr, f, s) in mine]
+        cmds = [fc.stage2('run', s, 'r1_%s_lr%g_f%g_%s' % ('ad' if ad else 'no', lr, f, s), lr=lr, frac=f, adapter=ad, steps=30000, every=2) for (ad, lr, f, s) in mine]
         submit('fa_r1_%d' % j, cmds)

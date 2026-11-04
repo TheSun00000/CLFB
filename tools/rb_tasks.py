@@ -58,6 +58,24 @@ def main():
         u /= np.linalg.norm(u, axis=1, keepdims=True)
         uni = float((np.einsum('nd,de,ne->n', u, M, u) / np.einsum('nd,de,ne->n', u, S0i, u)).mean())
         rows = [('uniform sphere (training average)', uni, float('nan')), ('constant reward r=1', ratio(zc), 1.0)]
+        # candidate nu: other generic latent distributions, average of R^B over 100k samples
+        avg = lambda Z: float((np.einsum('nd,de,ne->n', Z, M, Z) / np.einsum('nd,de,ne->n', Z, S0i, Z)).mean())
+        ev, U0 = np.linalg.eigh(S0)
+        S0h = (U0 * np.sqrt(ev)) @ U0.T
+        g = rng.normal(size=(100_000, F0.shape[1]))
+        zc_n = zc / np.linalg.norm(zc)
+        noisy = zc_n[None, :] + 0.5 * u
+        rows += [('cand: z = Sigma0 w, w~N(0,I) (random linear rewards in B0 features)', avg(g @ S0), float('nan')),
+                 ('cand: z = Sigma0^1/2 g (isotropic in whitened space)', avg(g @ S0h), float('nan')),
+                 ('cand: z_c + 0.5 noise', avg(noisy), float('nan')),
+                 ('cand: z = E[B0(s) 1{s in random half-space}] (random region rewards)', float('nan'), float('nan'))]
+        # random region rewards: r(s) = 1[b_j . x_s > median], x = observation projection on random directions
+        Xs = obs - obs.mean(0)
+        P = rng.normal(size=(24, 200))
+        proj = Xs @ P
+        reg = (proj > np.median(proj, 0)[None, :]).astype(np.float64)       # [n, 200]
+        Zr = (F0.T @ reg / n).T                                              # [200, d]
+        rows[-1] = ('cand: z = E[B0 r], r = indicator of a random half-space of the observation (200 rewards)', avg(Zr), float('nan'))
         for k in TASKS:
             r = R[k] / (np.sqrt((R[k] ** 2).mean()) + 1e-12)
             z = (F0 * r[:, None]).mean(0)

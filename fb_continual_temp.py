@@ -94,6 +94,7 @@ z_k = mean(rbar_k B) with B at the start of the stage. L_FB, ortho, L_rec, R^B, 
     kd_actor=0 kd_q=0       finetune=multi: weights of the anchors of the actor / of Q(s,a,z)=F^T z to their values at the start of the fine-tuning, on GENERIC latents
                             (uniform sphere, mix_ratio of them B(s) of shuffled states; no knowledge of any other task): retention of F and the actor
     multi_task_w=1,3,..     finetune=multi: sampling weights of the tasks (one per task of tasks=; default uniform)
+    eval_dense_until=0 eval_late_every=20   finetune=multi: evaluate every eval_each_steps chunks (1 chunk = 1000 updates) up to eval_dense_until, then every eval_late_every chunks
     b_adapter=0             finetune=multi: 1 = F and the actor of the stage are the PRETRAINED nets (adapter_ckpt=<pretrained pickle>) seen through the linear map
                             W = E[B0 B1^T] Sigma_1^-1 (B0 pretrained, B1 = B of checkpoint=, n states adapter_n=200000): pi'(s,z) = pi(s, sqrt(d) normalize(W z)),
                             F'(s,a,z) = W^T F(s, a, sqrt(d) normalize(W z)) (so that F'^T z = F^T (W z)). W is a frozen parameter 'adapter_W' of both nets
@@ -275,6 +276,8 @@ if __name__ == '__main__':
     N_LABELED       = int(kwargs['n_labeled']) if 'n_labeled' in kwargs else 10_000
     N_BIG           = int(kwargs['n_big']) if 'n_big' in kwargs else 50_000
     EVAL_EACH_STEPS = int(kwargs['eval_each_steps']) if 'eval_each_steps' in kwargs else 0   # in chunks; 0 = only at the end of a stage
+    EVAL_DENSE_UNTIL = int(kwargs['eval_dense_until']) if 'eval_dense_until' in kwargs else 0   # finetune=multi: evaluate every eval_each_steps chunks up to this chunk (0 = off) ...
+    EVAL_LATE_EVERY  = int(kwargs['eval_late_every']) if 'eval_late_every' in kwargs else 20    # ... and every eval_late_every chunks afterwards
     EVAL_BASELINE   = bool(int(kwargs['eval_baseline'])) if 'eval_baseline' in kwargs else True
     EVAL_N          = 10_000      # number of states for the eval-time reward / reconstruction statistics
     EVAL_FRESH      = bool(int(kwargs['eval_fresh'])) if 'eval_fresh' in kwargs else True
@@ -1963,7 +1966,12 @@ if __name__ == '__main__':
             row.update({m: float(np.mean(current_metrics[m])) for m in TRAIN_METRICS})
             train_logger.log(row)
             is_last = (chunk + 1) == CHUNKS_PER_STAGE
-            if EVAL_EACH_STEPS > 0 and (chunk + 1) % EVAL_EACH_STEPS == 0 and not is_last:
+            # eval_dense_until / eval_late_every (chunks of 1000 updates): every eval_each_steps up to eval_dense_until, then every eval_late_every
+            if EVAL_DENSE_UNTIL > 0 and chunk + 1 > EVAL_DENSE_UNTIL:
+                do_eval = (chunk + 1) % EVAL_LATE_EVERY == 0
+            else:
+                do_eval = EVAL_EACH_STEPS > 0 and (chunk + 1) % EVAL_EACH_STEPS == 0
+            if do_eval and not is_last:
                 run_eval(train_state, 1, step_in_stage, 'mid', [], [])
         save_agent(train_state, f"{MODEL_SAVE_FOLDER}/fb_multi.pickle", [], [], 1)
         run_eval(train_state, 1, STEPS_PER_STAGE, 'end', [], [])

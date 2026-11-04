@@ -12,11 +12,11 @@ def stage1(task, seed):
             'z_task_frac=0 actor_z_task_frac=0 model_dir=%s' % (PRE, task, S1[task][seed]))
 
 
-def stage2(task, seed, tag, lr=1e-4, frac=0.25, adapter=True, steps=200000, every=4, extra=''):
-    """Stage 2 (finetune=multi, B frozen). every = evaluation period in chunks of 1000 updates. Run folder is found through model_dir=models/multi/fa_<tag>."""
+def stage2(task, seed, tag, lr=1e-4, frac=0.25, adapter=True, steps=200000, every=5, dense_until=50, late_every=20, extra=''):
+    """Stage 2 (finetune=multi, B frozen). every = evaluation period in chunks of 1000 updates up to dense_until, then late_every (5k up to 50k, then every 20k). Run folder is found through model_dir=models/multi/fa_<tag>."""
     c = ('python $SCRIPT checkpoint=%s/fb_stage_1_%s.pickle env_name=walker n_labeled=100000 num_evals=5 lr_coef=1 bench=final eval_baseline=1 eval_rollouts=1 ridge=0 '
-         'finetune=multi steps_per_stage=%d eval_each_steps=%d z_task_spread=0 eval_stream_only=0 tasks=%s multi_task_frac=%g lr=%g'
-         % (S1[task][seed], task, steps, every, task, frac, lr))
+         'finetune=multi steps_per_stage=%d eval_each_steps=%d eval_dense_until=%d eval_late_every=%d z_task_spread=0 eval_stream_only=0 tasks=%s multi_task_frac=%g lr=%g'
+         % (S1[task][seed], task, steps, every, dense_until, late_every, task, frac, lr))
     if adapter:
         c += ' b_adapter=1 adapter_ckpt=%s' % PRE
     if extra:

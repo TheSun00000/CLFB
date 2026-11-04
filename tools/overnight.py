@@ -5,7 +5,7 @@
     python tools/overnight.py slots                                                                 # submitted jobs per QoS on the cluster
 
 Scripts are written to scripts/overnight/NAME.sh (local), copied to the cluster with noclobber (an existing script is never overwritten) and submitted with
-SCRIPT=fb_continual_temp_adapter.py. Limits: 10 submitted jobs per QoS (qos_gpu_a100-dev, qos_gpu-dev). `submit` refuses to go over LIMIT.
+SCRIPT=fb_continual_temp_fa.py. Limits: 10 submitted jobs per QoS (qos_gpu_a100-dev, qos_gpu-dev). `submit` refuses to go over LIMIT.
 """
 import argparse, os, subprocess, sys
 
@@ -64,13 +64,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('action', choices=['submit', 'slots'])
     ap.add_argument('name', nargs='?')
-    ap.add_argument('--qos', default='a100', choices=['a100', 'v100'])
+    ap.add_argument('--qos', default='auto', choices=['a100', 'v100', 'auto'])
     ap.add_argument('--cmd', action='append', default=[])
     ap.add_argument('--time', default=None)
     a = ap.parse_args()
     if a.action == 'slots':
         print(slots())
         return
+    if a.qos == 'auto':          # A100 first; V100 only when no A100 slot is left
+        s_ = slots()
+        a.qos = 'a100' if s_['a100'] < LIMIT else 'v100'
     used = slots()[a.qos]
     if used >= LIMIT:
         sys.exit('no free slot on %s (%d submitted)' % (a.qos, used))
@@ -83,7 +86,7 @@ def main():
     os.makedirs(os.path.join(ROOT, 'scripts', 'overnight'), exist_ok=True)
     path = os.path.join(ROOT, 'scripts', 'overnight', a.name + '.sh')
     open(path, 'w').write(text)
-    r = ssh("cd %s && set -o noclobber && mkdir -p scripts/overnight && cat > scripts/overnight/%s.sh && sbatch --job-name=%s --export=ALL,SCRIPT=fb_continual_temp_adapter.py scripts/overnight/%s.sh"
+    r = ssh("cd %s && set -o noclobber && mkdir -p scripts/overnight && cat > scripts/overnight/%s.sh && sbatch --job-name=%s --export=ALL,SCRIPT=fb_continual_temp_fa.py scripts/overnight/%s.sh"
             % (REMOTE, a.name, a.name, a.name), stdin=text)
     print(r.stdout.strip(), r.stderr.strip())
 

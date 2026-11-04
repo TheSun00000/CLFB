@@ -72,8 +72,7 @@ def main():
         print(slots())
         return
     if a.qos == 'auto':          # A100 first; V100 only when no A100 slot is left
-        s_ = slots()
-        a.qos = 'a100' if s_['a100'] < LIMIT else 'v100'
+        a.qos = 'v100'          # user decision 2026-11-04: V100 only
     used = slots()[a.qos]
     if used >= LIMIT:
         sys.exit('no free slot on %s (%d submitted)' % (a.qos, used))
